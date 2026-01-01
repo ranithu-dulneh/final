@@ -4,23 +4,48 @@ import PinModal from './PinModal'; // Ensure this is available if used, or use i
 // Inline ProductModal (same as before but we should keep it)
 function ProductModal({ product, onClose, onConfirm }) {
   const [selectedVariantId, setSelectedVariantId] = useState(product.variants[0]?.id || null);
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(''); // Text input for easier typing
   const [discount, setDiscount] = useState(0);
+  const [saleUnit, setSaleUnit] = useState('Unit'); // 'Unit', 'Kg', 'g'
   const [isSpecialDiscount, setIsSpecialDiscount] = useState(false);
   const [showPin, setShowPin] = useState(false);
 
   const selectedVariant = product.variants.find(v => v.id == selectedVariantId);
   const maxDiscount = selectedVariant?.max_discount || 0;
+  const itemUnit = selectedVariant?.measure_unit || 'Unit';
+
+  // Update sale unit when variant changes
+  useEffect(() => {
+    if (selectedVariant) {
+        setSaleUnit(selectedVariant.measure_unit || 'Unit');
+    }
+  }, [selectedVariant]);
+
+  // Conversion logic
+  // normalizedQty is what we subtract from stock (in base unit)
+  let normalizedQty = parseFloat(quantity) || 0;
+  if (itemUnit === 'Kg' && saleUnit === 'g') {
+      normalizedQty = normalizedQty / 1000;
+  }
 
   // Calculate price
-  const price = selectedVariant ? selectedVariant.selling_price : 0;
-  const discountedPrice = price - (isSpecialDiscount ? (price * discount / 100) : (price * Math.min(discount, maxDiscount) / 100));
-  const finalTotal = discountedPrice * quantity;
+  // Price is per ITEM UNIT.
+  const pricePerBaseUnit = selectedVariant ? selectedVariant.selling_price : 0;
+  const unitPrice = pricePerBaseUnit; // For calc purposes
+
+  const discountedUnitPrice = unitPrice - (isSpecialDiscount ? (unitPrice * discount / 100) : (unitPrice * Math.min(discount, maxDiscount) / 100));
+  const finalTotal = discountedUnitPrice * normalizedQty;
 
   const handleConfirm = () => {
     if (!selectedVariant) return;
-    if (quantity > selectedVariant.stock) {
-      alert("Insufficient stock!");
+    const qtyVal = parseFloat(quantity);
+    if (!qtyVal || qtyVal <= 0) {
+        alert("Enter valid quantity");
+        return;
+    }
+
+    if (normalizedQty > selectedVariant.stock) {
+      alert(`Insufficient stock! Request: ${normalizedQty} ${itemUnit}, Available: ${selectedVariant.stock} ${itemUnit}`);
       return;
     }
 
@@ -33,10 +58,12 @@ function ProductModal({ product, onClose, onConfirm }) {
       productName: product.name,
       variantId: selectedVariant.id,
       variantName: selectedVariant.name,
-      price: price, // Base price
-      quantity,
-      discount: isSpecialDiscount ? discount : Math.min(discount, maxDiscount), // Actual discount % applied
-      finalPrice: discountedPrice
+      price: pricePerBaseUnit, // Base price per stock unit
+      quantity: normalizedQty, // Stock decrement amount
+      displayQuantity: qtyVal,
+      displayUnit: saleUnit,
+      discount: isSpecialDiscount ? discount : Math.min(discount, maxDiscount),
+      finalPrice: discountedUnitPrice // Price per base unit after discount
     });
     onClose();
   };
@@ -64,27 +91,42 @@ function ProductModal({ product, onClose, onConfirm }) {
                  onClick={() => setSelectedVariantId(v.id)}
                  className={`p-2 border rounded text-sm ${selectedVariantId === v.id ? 'bg-brand-green text-white border-brand-green' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
                >
-                 {v.name} (Rs. {v.selling_price})
+                 {v.name} (Rs. {v.selling_price}/{v.measure_unit || 'Unit'})
                </button>
              ))}
           </div>
           {selectedVariant && (
-             <p className="text-xs text-gray-500 mt-1">Stock: {selectedVariant.stock} available</p>
+             <p className="text-xs text-gray-500 mt-1">Stock: {selectedVariant.stock} {selectedVariant.measure_unit || 'Unit'} available</p>
           )}
         </div>
 
         {/* Quantity */}
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-          <div className="flex items-center">
-            <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="p-2 bg-gray-200 rounded-l">-</button>
+          <div className="flex gap-2">
             <input
               type="number"
+              autoFocus
+              onFocus={(e) => e.target.select()}
               value={quantity}
-              onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-              className="p-2 border-t border-b w-full text-center outline-none"
+              placeholder="Qty"
+              onChange={(e) => setQuantity(e.target.value)}
+              className="p-3 border rounded w-2/3 text-lg font-bold outline-brand-green"
             />
-            <button onClick={() => setQuantity(quantity + 1)} className="p-2 bg-gray-200 rounded-r">+</button>
+            {itemUnit === 'Kg' ? (
+                <select
+                    value={saleUnit}
+                    onChange={(e) => setSaleUnit(e.target.value)}
+                    className="p-2 border rounded w-1/3 bg-white font-semibold"
+                >
+                    <option value="Kg">Kg</option>
+                    <option value="g">g</option>
+                </select>
+            ) : (
+                <div className="p-3 border rounded w-1/3 bg-gray-50 text-center font-semibold text-gray-600">
+                    {itemUnit}
+                </div>
+            )}
           </div>
         </div>
 
@@ -359,7 +401,7 @@ export default function Register() {
              <div key={index} className="flex justify-between items-center border-b pb-2">
                <div>
                  <h4 className="font-medium text-gray-800">{item.productName} <span className="text-sm text-gray-500">({item.variantName})</span></h4>
-                 <div className="text-xs text-gray-500">Rs. {item.finalPrice.toFixed(2)} x {item.quantity} {item.discount > 0 && <span className="text-green-600">(-{item.discount}%)</span>}</div>
+                 <div className="text-xs text-gray-500">Rs. {item.finalPrice.toFixed(2)} x {item.displayQuantity || item.quantity} {item.displayUnit || ''} {item.discount > 0 && <span className="text-green-600">(-{item.discount}%)</span>}</div>
                </div>
                <div className="flex items-center gap-3">
                  <span className="font-bold">Rs. {(item.finalPrice * item.quantity).toFixed(2)}</span>

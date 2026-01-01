@@ -8,7 +8,7 @@ export default function Inventory() {
   });
   const [variants, setVariants] = useState([]);
   const [variantForm, setVariantForm] = useState({
-    name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: ''
+    name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '', measure_unit: 'Unit'
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -84,7 +84,7 @@ export default function Inventory() {
       return;
     }
     setVariants([...variants, { ...variantForm }]);
-    setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '' });
+    setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '', measure_unit: 'Unit' });
   };
 
   const removeVariant = async (index, variant) => {
@@ -153,7 +153,7 @@ export default function Inventory() {
   const resetForm = () => {
     setFormData({ name: '', category: categories[0]?.name || '' });
     setVariants([]);
-    setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '' });
+    setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '', measure_unit: 'Unit' });
     setIsEditing(false);
     setEditProductId(null);
   };
@@ -170,7 +170,8 @@ export default function Inventory() {
       cost_price: v.cost_price,
       selling_price: v.selling_price,
       stock: v.stock,
-      max_discount: v.max_discount
+      max_discount: v.max_discount,
+      measure_unit: v.measure_unit
     })));
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -239,7 +240,14 @@ export default function Inventory() {
               <input name="sku" placeholder="SKU/Barcode" value={variantForm.sku} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
               <input name="cost_price" type="number" placeholder="Cost" value={variantForm.cost_price} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
               <input name="selling_price" type="number" placeholder="Price (Rs)" value={variantForm.selling_price} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
-              <input name="stock" type="number" placeholder="Stock" value={variantForm.stock} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+              <div className="flex gap-1">
+                 <input name="stock" type="number" placeholder="Stock" value={variantForm.stock} onChange={handleVariantChange} className="p-2 border rounded text-sm w-2/3" />
+                 <select name="measure_unit" value={variantForm.measure_unit} onChange={handleVariantChange} className="p-2 border rounded text-sm w-1/3 bg-white">
+                    <option value="Unit">Unit</option>
+                    <option value="Kg">Kg</option>
+                    <option value="g">g</option>
+                 </select>
+              </div>
               <input name="max_discount" type="number" placeholder="Max Disc %" value={variantForm.max_discount} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
             </div>
             <button type="button" onClick={addVariant} className="bg-gray-600 text-white px-4 py-1 rounded text-sm hover:bg-gray-700">Add Variant</button>
@@ -253,6 +261,7 @@ export default function Inventory() {
                       <th className="p-2 text-left">SKU</th>
                       <th className="p-2 text-left">Price</th>
                       <th className="p-2 text-left">Stock</th>
+                      <th className="p-2 text-left">Unit</th>
                       <th className="p-2 text-left">Max Disc</th>
                       <th className="p-2">Action</th>
                     </tr>
@@ -264,6 +273,7 @@ export default function Inventory() {
                         <td className="p-2">{v.sku}</td>
                         <td className="p-2">Rs. {v.selling_price}</td>
                         <td className="p-2">{v.stock}</td>
+                        <td className="p-2">{v.measure_unit || 'Unit'}</td>
                         <td className="p-2">{v.max_discount}%</td>
                         <td className="p-2">
                           <button type="button" onClick={() => removeVariant(i, v)} className="text-red-600 hover:text-red-800">Remove</button>

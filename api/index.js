@@ -12,7 +12,7 @@ app.get('/api/products', (req, res) => {
   const sql = `
     SELECT
       p.id as p_id, p.name as p_name, p.category,
-      v.id as v_id, v.variant_name, v.sku, v.cost_price, v.selling_price, v.stock_quantity, v.max_discount
+      v.id as v_id, v.variant_name, v.sku, v.cost_price, v.selling_price, v.stock_quantity, v.max_discount, v.measure_unit
     FROM products p
     LEFT JOIN variants v ON p.id = v.product_id
   `;
@@ -43,7 +43,8 @@ app.get('/api/products', (req, res) => {
           cost_price: row.cost_price,
           selling_price: row.selling_price,
           stock: row.stock_quantity,
-          max_discount: row.max_discount
+          max_discount: row.max_discount,
+          measure_unit: row.measure_unit || 'Unit'
         });
       }
     });
@@ -89,11 +90,11 @@ app.post('/api/products', (req, res) => {
       }
       const productId = this.lastID;
 
-      const stmt = db.prepare('INSERT INTO variants (product_id, variant_name, sku, cost_price, selling_price, stock_quantity, max_discount) VALUES (?,?,?,?,?,?,?)');
+      const stmt = db.prepare('INSERT INTO variants (product_id, variant_name, sku, cost_price, selling_price, stock_quantity, max_discount, measure_unit) VALUES (?,?,?,?,?,?,?,?)');
 
       let errorOccurred = false;
       variants.forEach(v => {
-        stmt.run(productId, v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, (err) => {
+        stmt.run(productId, v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, v.measure_unit || 'Unit', (err) => {
           if (err) errorOccurred = true;
         });
       });
@@ -130,8 +131,8 @@ app.put('/api/products/:id', (req, res) => {
         return res.status(400).json({ error: err.message });
       }
 
-      const stmtInsert = db.prepare('INSERT INTO variants (product_id, variant_name, sku, cost_price, selling_price, stock_quantity, max_discount) VALUES (?,?,?,?,?,?,?)');
-      const stmtUpdate = db.prepare('UPDATE variants SET variant_name = ?, sku = ?, cost_price = ?, selling_price = ?, stock_quantity = ?, max_discount = ? WHERE id = ?');
+      const stmtInsert = db.prepare('INSERT INTO variants (product_id, variant_name, sku, cost_price, selling_price, stock_quantity, max_discount, measure_unit) VALUES (?,?,?,?,?,?,?,?)');
+      const stmtUpdate = db.prepare('UPDATE variants SET variant_name = ?, sku = ?, cost_price = ?, selling_price = ?, stock_quantity = ?, max_discount = ?, measure_unit = ? WHERE id = ?');
 
       let errorOccurred = false;
       let processed = 0;
@@ -139,12 +140,12 @@ app.put('/api/products/:id', (req, res) => {
       variants.forEach(v => {
         if (v.id) {
           // Update existing
-          stmtUpdate.run(v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, v.id, (err) => {
+          stmtUpdate.run(v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, v.measure_unit || 'Unit', v.id, (err) => {
              if (err) errorOccurred = true;
           });
         } else {
           // Insert new
-          stmtInsert.run(productId, v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, (err) => {
+          stmtInsert.run(productId, v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, v.measure_unit || 'Unit', (err) => {
              if (err) errorOccurred = true;
           });
         }

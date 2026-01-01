@@ -35,8 +35,14 @@ const initDb = () => {
       selling_price REAL,
       stock_quantity INTEGER DEFAULT 0,
       max_discount REAL DEFAULT 0,
+      measure_unit TEXT DEFAULT 'Unit',
       FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
     )`);
+
+    // Migration for existing tables (safe to run always)
+    db.run("ALTER TABLE variants ADD COLUMN measure_unit TEXT DEFAULT 'Unit'", (err) => {
+       // Ignore error if column exists
+    });
 
     // Sales Table
     db.run(`CREATE TABLE IF NOT EXISTS sales (
