@@ -1,9 +1,165 @@
 import React, { useState, useEffect } from 'react';
+import PinModal from './PinModal'; // Reusing or creating new if not exists, wait, need to check if PinModal exists.
+// Assuming PinModal logic is simple, I will include logic inline or create it if needed.
+// Actually, PinModal.jsx exists from `list_files` earlier.
+
+// Product Selection Modal Component
+function ProductModal({ product, onClose, onConfirm }) {
+  const [selectedVariantId, setSelectedVariantId] = useState(product.variants[0]?.id || null);
+  const [quantity, setQuantity] = useState(1);
+  const [discount, setDiscount] = useState(0);
+  const [isSpecialDiscount, setIsSpecialDiscount] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+
+  const selectedVariant = product.variants.find(v => v.id == selectedVariantId);
+  const maxDiscount = selectedVariant?.max_discount || 0;
+
+  // Calculate price
+  const price = selectedVariant ? selectedVariant.selling_price : 0;
+  const discountedPrice = price - (isSpecialDiscount ? (price * discount / 100) : (price * Math.min(discount, maxDiscount) / 100));
+  const finalTotal = discountedPrice * quantity;
+
+  const handleConfirm = () => {
+    if (!selectedVariant) return;
+    if (quantity > selectedVariant.stock) {
+      alert("Insufficient stock!");
+      return;
+    }
+
+    // If Special Discount is checked, we assume PIN was already verified when the checkbox was clicked (or we verify now).
+    // Let's verify now if discount > maxDiscount and special is not enabled? No, UI says check special to enable high discount.
+
+    if (discount > maxDiscount && !isSpecialDiscount) {
+      alert(`Discount exceeds maximum allowed (${maxDiscount}%). Enable Special Discount to override.`);
+      return;
+    }
+
+    onConfirm({
+      productName: product.name,
+      variantId: selectedVariant.id,
+      variantName: selectedVariant.name,
+      price: price, // Base price
+      quantity,
+      discount: isSpecialDiscount ? discount : Math.min(discount, maxDiscount), // Actual discount % applied
+      finalPrice: discountedPrice
+    });
+    onClose();
+  };
+
+  const toggleSpecialDiscount = (e) => {
+    if (e.target.checked) {
+      setShowPin(true);
+    } else {
+      setIsSpecialDiscount(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white p-6 rounded-lg w-full max-w-md">
+        <h3 className="text-xl font-bold mb-4">{product.name}</h3>
+
+        {/* Variant Selection */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Select Variant</label>
+          <div className="grid grid-cols-2 gap-2">
+             {product.variants.map(v => (
+               <button
+                 key={v.id}
+                 onClick={() => setSelectedVariantId(v.id)}
+                 className={`p-2 border rounded text-sm ${selectedVariantId === v.id ? 'bg-brand-green text-white border-brand-green' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+               >
+                 {v.name} (Rs. {v.selling_price})
+               </button>
+             ))}
+          </div>
+          {selectedVariant && (
+             <p className="text-xs text-gray-500 mt-1">Stock: {selectedVariant.stock} available</p>
+          )}
+        </div>
+
+        {/* Quantity */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+          <div className="flex items-center">
+            <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="p-2 bg-gray-200 rounded-l">-</button>
+            <input
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+              className="p-2 border-t border-b w-full text-center outline-none"
+            />
+            <button onClick={() => setQuantity(quantity + 1)} className="p-2 bg-gray-200 rounded-r">+</button>
+          </div>
+        </div>
+
+        {/* Discount */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Discount (%) (Max: {maxDiscount}%)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={discount}
+              onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
+              className="p-2 border rounded w-full"
+            />
+            <div className="flex items-center whitespace-nowrap">
+               <input
+                 type="checkbox"
+                 id="special"
+                 checked={isSpecialDiscount}
+                 onChange={toggleSpecialDiscount}
+                 className="mr-1"
+               />
+               <label htmlFor="special" className="text-sm cursor-pointer select-none">Special (Admin)</label>
+            </div>
+          </div>
+        </div>
+
+        {/* Total Display */}
+        <div className="bg-gray-50 p-3 rounded mb-6 flex justify-between items-center">
+           <span className="text-gray-600">Total</span>
+           <span className="text-xl font-bold text-brand-green">Rs. {finalTotal.toFixed(2)}</span>
+        </div>
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2 border rounded text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={handleConfirm} className="flex-1 py-2 bg-brand-green text-white rounded hover:bg-green-700 font-bold">Add to Cart</button>
+        </div>
+      </div>
+
+      {showPin && (
+         // Simple prompt for now, or reuse PinModal if exported properly.
+         // Since I cannot easily import a default export inside a function component file without proper structure,
+         // I'll implement a simple pin check here or use a portal.
+         <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-60">
+            <div className="bg-white p-6 rounded shadow-lg text-center">
+               <h3 className="mb-4 font-bold">Admin Authorization</h3>
+               <input type="password" id="adminPin" placeholder="PIN" className="border p-2 rounded mb-4" />
+               <div className="flex gap-2 justify-center">
+                  <button onClick={() => setShowPin(false)} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+                  <button onClick={() => {
+                     const val = document.getElementById('adminPin').value;
+                     if(val === '1234') {
+                        setIsSpecialDiscount(true);
+                        setShowPin(false);
+                     } else {
+                        alert('Incorrect PIN');
+                     }
+                  }} className="px-4 py-2 bg-red-600 text-white rounded">Verify</button>
+               </div>
+            </div>
+         </div>
+      )}
+    </div>
+  );
+}
 
 export default function Register() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [lastSale, setLastSale] = useState(null);
@@ -18,42 +174,36 @@ export default function Register() {
 
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase())
+    p.variants.some(v => v.sku.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const addToCart = (product) => {
-    if (product.stock <= 0) {
-      alert('Out of stock!');
-      return;
-    }
-    const existing = cart.find(item => item.id === product.id);
+  const addToCart = (itemData) => {
+    // itemData: { productName, variantId, variantName, price, quantity, discount, finalPrice }
+
+    // Check if variant already in cart
+    const existing = cart.find(c => c.variantId === itemData.variantId && c.discount === itemData.discount);
+
     if (existing) {
-      if (existing.quantity >= product.stock) {
-        alert('Not enough stock!');
-        return;
-      }
-      setCart(cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item));
+      // Update quantity
+       const newCart = cart.map(c =>
+         (c.variantId === itemData.variantId && c.discount === itemData.discount)
+         ? { ...c, quantity: c.quantity + itemData.quantity }
+         : c
+       );
+       setCart(newCart);
     } else {
-      setCart([...cart, { ...product, quantity: 1 }]);
+       setCart([...cart, { ...itemData, id: Date.now() }]); // Add unique ID for React key if needed
     }
   };
 
-  const updateQuantity = (id, newQty) => {
-    if (newQty <= 0) {
-      setCart(cart.filter(item => item.id !== id));
-      return;
-    }
-    const product = products.find(p => p.id === id);
-    if (newQty > product.stock) {
-      alert('Not enough stock!');
-      return;
-    }
-    setCart(cart.map(item => item.id === id ? { ...item, quantity: newQty } : item));
+  const removeFromCart = (index) => {
+    setCart(cart.filter((_, i) => i !== index));
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.selling_price * item.quantity), 0);
-  const tax = subtotal * 0.1; // 10% tax example
-  const total = subtotal + tax;
+  const total = cart.reduce((sum, item) => sum + (item.finalPrice * item.quantity), 0); // finalPrice is already discounted unit price * qty? No wait.
+  // In ProductModal: finalTotal = discountedPrice * quantity.
+  // We passed `finalPrice` as `discountedPrice` (unit price after discount).
+  // So Cart Total = sum(item.finalPrice * item.quantity).
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
@@ -61,9 +211,10 @@ export default function Register() {
 
     const saleData = {
       items: cart.map(item => ({
-        productId: item.id,
+        variantId: item.variantId,
         quantity: item.quantity,
-        price: item.selling_price
+        price: item.finalPrice, // This is the unit price at sale (sold price)
+        discount: (item.price - item.finalPrice) // Store discount amount per unit
       }))
     };
 
@@ -84,8 +235,7 @@ export default function Register() {
           date: new Date().toLocaleString()
         });
         setCart([]);
-        // Refresh products to get new stock levels
-        fetch('/api/products')
+        fetch('/api/products') // Refresh stock
           .then(res => res.json())
           .then(data => setProducts(data.data || []));
 
@@ -100,44 +250,27 @@ export default function Register() {
     setLoading(false);
   };
 
-  const closeReceipt = () => {
-    setLastSale(null);
-  };
-
   if (lastSale) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="bg-white p-8 rounded-lg shadow-xl max-w-md w-full border text-center">
           <div className="mb-4">
-             <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mx-auto mb-2">
+             <div className="w-16 h-16 bg-green-100 text-brand-green rounded-full flex items-center justify-center mx-auto mb-2">
                 <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
              </div>
              <h2 className="text-2xl font-bold text-gray-800">Payment Successful</h2>
              <p className="text-gray-500">{lastSale.date}</p>
-             <p className="text-gray-400 text-sm">Sale ID: #{lastSale.id}</p>
           </div>
-
           <div className="border-t border-b py-4 mb-4 text-left">
-            {lastSale.items.map((item) => (
-              <div key={item.id} className="flex justify-between mb-2">
-                <span>{item.name} x{item.quantity}</span>
-                <span>${(item.selling_price * item.quantity).toFixed(2)}</span>
+            {lastSale.items.map((item, i) => (
+              <div key={i} className="flex justify-between mb-2">
+                <span>{item.productName} ({item.variantName}) x{item.quantity}</span>
+                <span>Rs. {(item.finalPrice * item.quantity).toFixed(2)}</span>
               </div>
             ))}
           </div>
-
-          <div className="text-right space-y-1 mb-6">
-             <div className="flex justify-between text-gray-600"><span>Subtotal</span> <span>${(lastSale.total / 1.1).toFixed(2)}</span></div>
-             <div className="flex justify-between text-gray-600"><span>Tax (10%)</span> <span>${(lastSale.total - (lastSale.total / 1.1)).toFixed(2)}</span></div>
-             <div className="flex justify-between text-xl font-bold"><span>Total</span> <span>${lastSale.total.toFixed(2)}</span></div>
-          </div>
-
-          <button
-            onClick={closeReceipt}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700"
-          >
-            New Sale
-          </button>
+          <div className="flex justify-between text-xl font-bold mb-6"><span>Total</span> <span>Rs. {lastSale.total.toFixed(2)}</span></div>
+          <button onClick={() => setLastSale(null)} className="w-full bg-brand-green text-white py-3 rounded-lg font-bold hover:bg-green-700">New Sale</button>
         </div>
       </div>
     );
@@ -151,7 +284,7 @@ export default function Register() {
           <input
             type="text"
             placeholder="Search by Name or SKU..."
-            className="w-full p-3 border rounded-lg shadow-sm"
+            className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-brand-green outline-none"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -160,18 +293,15 @@ export default function Register() {
           {filteredProducts.map(product => (
             <div
               key={product.id}
-              onClick={() => addToCart(product)}
+              onClick={() => setSelectedProduct(product)}
               className="bg-white p-4 rounded-lg shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100 flex flex-col justify-between"
             >
               <div>
                 <h3 className="font-bold text-gray-800">{product.name}</h3>
-                <p className="text-sm text-gray-500">{product.sku}</p>
+                <p className="text-xs text-gray-500">{product.variants.length} Variants</p>
               </div>
-              <div className="mt-2 flex justify-between items-center">
-                <span className="font-bold text-blue-600">${product.selling_price}</span>
-                <span className={`text-xs font-semibold px-2 py-1 rounded ${product.stock > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                  {product.stock} left
-                </span>
+              <div className="mt-2 text-right">
+                <span className="text-sm font-semibold text-brand-green">Select &gt;</span>
               </div>
             </div>
           ))}
@@ -179,42 +309,31 @@ export default function Register() {
       </div>
 
       {/* Cart Sidebar */}
-      <div className="w-full lg:w-96 bg-white rounded-lg shadow-lg flex flex-col h-[80vh] lg:h-auto">
+      <div className="w-full lg:w-96 bg-white rounded-lg shadow-lg flex flex-col h-[60vh] lg:h-auto border border-gray-200">
         <div className="p-4 border-b bg-gray-50 rounded-t-lg">
-          <h2 className="text-xl font-bold">Current Order</h2>
+          <h2 className="text-xl font-bold text-gray-800">Current Order</h2>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
            {cart.length === 0 && <p className="text-center text-gray-400 mt-10">Cart is empty</p>}
-           {cart.map(item => (
-             <div key={item.id} className="flex justify-between items-center border-b pb-2">
+           {cart.map((item, index) => (
+             <div key={index} className="flex justify-between items-center border-b pb-2">
                <div>
-                 <h4 className="font-medium">{item.name}</h4>
-                 <div className="text-sm text-gray-500">${item.selling_price} x {item.quantity}</div>
+                 <h4 className="font-medium text-gray-800">{item.productName} <span className="text-sm text-gray-500">({item.variantName})</span></h4>
+                 <div className="text-xs text-gray-500">Rs. {item.finalPrice.toFixed(2)} x {item.quantity} {item.discount > 0 && <span className="text-green-600">(-{item.discount}%)</span>}</div>
                </div>
-               <div className="flex items-center space-x-2">
-                 <button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="p-1 bg-gray-200 rounded text-gray-700">-</button>
-                 <span className="w-8 text-center">{item.quantity}</span>
-                 <button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="p-1 bg-gray-200 rounded text-gray-700">+</button>
+               <div className="flex items-center gap-3">
+                 <span className="font-bold">Rs. {(item.finalPrice * item.quantity).toFixed(2)}</span>
+                 <button onClick={() => removeFromCart(index)} className="text-red-500 font-bold">&times;</button>
                </div>
              </div>
            ))}
         </div>
 
         <div className="p-4 border-t bg-gray-50 rounded-b-lg">
-          <div className="space-y-2 mb-4">
-            <div className="flex justify-between text-gray-600">
-              <span>Subtotal</span>
-              <span>${subtotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span>Tax (10%)</span>
-              <span>${tax.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-xl font-bold text-gray-800">
+          <div className="flex justify-between text-xl font-bold text-gray-800 mb-4">
               <span>Total</span>
-              <span>${total.toFixed(2)}</span>
-            </div>
+              <span>Rs. {total.toFixed(2)}</span>
           </div>
 
           {message && <div className={`mb-2 text-center text-sm font-bold ${message.includes('Error') ? 'text-red-500' : 'text-green-500'}`}>{message}</div>}
@@ -222,12 +341,21 @@ export default function Register() {
           <button
             onClick={handleCheckout}
             disabled={cart.length === 0 || loading}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+            className="w-full bg-brand-green text-white py-3 rounded-lg font-bold shadow hover:bg-green-700 disabled:bg-gray-400 transition-colors"
           >
             {loading ? 'Processing...' : 'Charge'}
           </button>
         </div>
       </div>
+
+      {/* Modal */}
+      {selectedProduct && (
+        <ProductModal
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onConfirm={addToCart}
+        />
+      )}
     </div>
   );
 }

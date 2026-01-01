@@ -3,10 +3,16 @@ import React, { useState, useEffect } from 'react';
 export default function Inventory() {
   const [products, setProducts] = useState([]);
   const [formData, setFormData] = useState({
-    name: '', category: '', sku: '', cost_price: '', selling_price: '', stock: ''
+    name: '', category: ''
+  });
+  const [variants, setVariants] = useState([]);
+  const [variantForm, setVariantForm] = useState({
+    name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: ''
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editProductId, setEditProductId] = useState(null);
 
   const fetchProducts = async () => {
     try {
@@ -22,23 +28,69 @@ export default function Inventory() {
     fetchProducts();
   }, []);
 
-  const handleChange = (e) => {
+  const handleProductChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleVariantChange = (e) => {
+    setVariantForm({ ...variantForm, [e.target.name]: e.target.value });
+  };
+
+  const addVariant = () => {
+    if (!variantForm.name || !variantForm.sku || !variantForm.selling_price) {
+      alert("Name, SKU, and Selling Price are required for a variant.");
+      return;
+    }
+    setVariants([...variants, { ...variantForm }]);
+    setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '' });
+  };
+
+  const removeVariant = async (index, variant) => {
+    if (variant.id) {
+       // It's an existing variant in edit mode
+       if (!window.confirm("Are you sure you want to delete this variant?")) return;
+       try {
+         await fetch(`/api/variants/${variant.id}`, { method: 'DELETE' });
+         // Remove from local state
+         setVariants(variants.filter((_, i) => i !== index));
+       } catch (err) {
+         alert("Error deleting variant");
+       }
+    } else {
+       // Just remove from state
+       setVariants(variants.filter((_, i) => i !== index));
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (variants.length === 0) {
+      alert("Please add at least one variant.");
+      return;
+    }
     setLoading(true);
     setMessage('');
+
     try {
-      const res = await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
+      const payload = { ...formData, variants };
+      let res;
+      if (isEditing) {
+        res = await fetch(`/api/products/${editProductId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } else {
+        res = await fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
+
       if (res.ok) {
-        setMessage('Product added successfully!');
-        setFormData({ name: '', category: '', sku: '', cost_price: '', selling_price: '', stock: '' });
+        setMessage(isEditing ? 'Product updated successfully!' : 'Product added successfully!');
+        resetForm();
         fetchProducts();
       } else {
         const errData = await res.json().catch(() => ({ error: res.statusText }));
@@ -50,8 +102,34 @@ export default function Inventory() {
     setLoading(false);
   };
 
+  const resetForm = () => {
+    setFormData({ name: '', category: '' });
+    setVariants([]);
+    setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '' });
+    setIsEditing(false);
+    setEditProductId(null);
+  };
+
+  const handleEdit = (product) => {
+    setIsEditing(true);
+    setEditProductId(product.id);
+    setFormData({ name: product.name, category: product.category });
+    // Map variants to ensure numbers are handled for form inputs if needed, though state handles strings too
+    setVariants(product.variants.map(v => ({
+      id: v.id,
+      name: v.name,
+      sku: v.sku,
+      cost_price: v.cost_price,
+      selling_price: v.selling_price,
+      stock: v.stock,
+      max_discount: v.max_discount
+    })));
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this product?')) return;
+    if (!window.confirm('Are you sure you want to delete this product and all its variants?')) return;
     try {
       await fetch(`/api/products/${id}`, { method: 'DELETE' });
       fetchProducts();
@@ -60,14 +138,17 @@ export default function Inventory() {
     }
   };
 
-  const handleRestock = async (id) => {
-    const quantity = prompt('Enter quantity to add:');
+  const handleRestock = async (variantId, currentStock) => {
+    const quantity = prompt('Enter quantity to add:', '0');
     if (!quantity || isNaN(quantity)) return;
+    const qtyInt = parseInt(quantity);
+    if (qtyInt === 0) return;
+
     try {
-      await fetch(`/api/products/${id}/stock`, {
+      await fetch(`/api/variants/${variantId}/stock`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity: parseInt(quantity) })
+        body: JSON.stringify({ quantity: qtyInt })
       });
       fetchProducts();
     } catch (error) {
@@ -77,46 +158,104 @@ export default function Inventory() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-6 rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold mb-4">Add New Product</h2>
-        {message && <div className="mb-4 p-2 bg-blue-100 text-blue-700 rounded">{message}</div>}
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <input name="name" placeholder="Product Name" value={formData.name} onChange={handleChange} className="p-2 border rounded" required />
-          <input name="category" placeholder="Category" value={formData.category} onChange={handleChange} className="p-2 border rounded" />
-          <input name="sku" placeholder="SKU/Barcode" value={formData.sku} onChange={handleChange} className="p-2 border rounded" required />
-          <input name="cost_price" type="number" placeholder="Cost Price" value={formData.cost_price} onChange={handleChange} className="p-2 border rounded" required />
-          <input name="selling_price" type="number" placeholder="Selling Price" value={formData.selling_price} onChange={handleChange} className="p-2 border rounded" required />
-          <input name="stock" type="number" placeholder="Initial Stock" value={formData.stock} onChange={handleChange} className="p-2 border rounded" required />
-          <button type="submit" disabled={loading} className="md:col-span-3 bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
-            {loading ? 'Saving...' : 'Add Product'}
+      <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-brand-green">
+        <div className="flex justify-between items-center mb-4">
+           <h2 className="text-xl font-semibold text-brand-green">{isEditing ? 'Edit Product' : 'Add New Product'}</h2>
+           {isEditing && <button onClick={resetForm} className="text-sm text-gray-500 hover:text-gray-700">Cancel Edit</button>}
+        </div>
+
+        {message && <div className={`mb-4 p-2 rounded ${message.includes('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{message}</div>}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input name="name" placeholder="Product Name" value={formData.name} onChange={handleProductChange} className="p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none" required />
+            <input name="category" placeholder="Category" value={formData.category} onChange={handleProductChange} className="p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none" />
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded border border-gray-200">
+            <h3 className="text-md font-medium mb-2 text-gray-700">Variants</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
+              <input name="name" placeholder="Variant (e.g. 100ml)" value={variantForm.name} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+              <input name="sku" placeholder="SKU/Barcode" value={variantForm.sku} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+              <input name="cost_price" type="number" placeholder="Cost" value={variantForm.cost_price} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+              <input name="selling_price" type="number" placeholder="Price (Rs)" value={variantForm.selling_price} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+              <input name="stock" type="number" placeholder="Stock" value={variantForm.stock} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+              <input name="max_discount" type="number" placeholder="Max Disc %" value={variantForm.max_discount} onChange={handleVariantChange} className="p-2 border rounded text-sm" />
+            </div>
+            <button type="button" onClick={addVariant} className="bg-gray-600 text-white px-4 py-1 rounded text-sm hover:bg-gray-700">Add Variant</button>
+
+            {variants.length > 0 && (
+              <div className="mt-4">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="p-2 text-left">Variant</th>
+                      <th className="p-2 text-left">SKU</th>
+                      <th className="p-2 text-left">Price</th>
+                      <th className="p-2 text-left">Stock</th>
+                      <th className="p-2 text-left">Max Disc</th>
+                      <th className="p-2">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variants.map((v, i) => (
+                      <tr key={i} className="border-b">
+                        <td className="p-2">{v.name}</td>
+                        <td className="p-2">{v.sku}</td>
+                        <td className="p-2">Rs. {v.selling_price}</td>
+                        <td className="p-2">{v.stock}</td>
+                        <td className="p-2">{v.max_discount}%</td>
+                        <td className="p-2">
+                          <button type="button" onClick={() => removeVariant(i, v)} className="text-red-600 hover:text-red-800">Remove</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <button type="submit" disabled={loading} className="w-full bg-brand-green text-white py-2 rounded font-semibold hover:bg-green-700 transition-colors">
+            {loading ? 'Saving...' : (isEditing ? 'Update Product' : 'Save Product')}
           </button>
         </form>
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold mb-4">Product List</h2>
+        <h2 className="text-xl font-semibold mb-4">Inventory List</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Variants</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {products.map((product) => (
                 <tr key={product.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">{product.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.sku}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">${product.selling_price}</td>
-                  <td className={`px-6 py-4 whitespace-nowrap font-bold ${product.stock < 5 ? 'text-red-600' : 'text-green-600'}`}>
-                    {product.stock}
+                  <td className="px-6 py-4 whitespace-nowrap font-medium">{product.name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-gray-500">{product.category}</td>
+                  <td className="px-6 py-4">
+                    <div className="space-y-1">
+                      {product.variants.map(v => (
+                        <div key={v.id} className="text-sm flex justify-between items-center bg-gray-50 p-1 rounded">
+                          <span>
+                            <span className="font-semibold">{v.name}</span>
+                            <span className="text-gray-500 ml-2">({v.sku})</span>
+                          </span>
+                          <span className="mx-2">Rs. {v.selling_price}</span>
+                          <span className={`${v.stock < 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>Qty: {v.stock}</span>
+                          <button onClick={() => handleRestock(v.id, v.stock)} className="text-xs text-blue-600 hover:underline ml-2">Restock</button>
+                        </div>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button onClick={() => handleRestock(product.id)} className="text-indigo-600 hover:text-indigo-900">Restock</button>
+                    <button onClick={() => handleEdit(product)} className="text-indigo-600 hover:text-indigo-900 font-bold">Edit</button>
                     <button onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-900">Delete</button>
                   </td>
                 </tr>

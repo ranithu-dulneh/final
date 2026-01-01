@@ -4,41 +4,150 @@ const bodyParser = require('body-parser');
 const { db } = require('./database');
 
 const app = express();
-// const PORT = 3001; // Removed for Vercel
-
 app.use(cors());
 app.use(bodyParser.json());
 
-// Get all products
+// Get all products (with variants)
 app.get('/api/products', (req, res) => {
-  db.all('SELECT * FROM products', [], (err, rows) => {
+  const sql = `
+    SELECT
+      p.id as p_id, p.name as p_name, p.category,
+      v.id as v_id, v.variant_name, v.sku, v.cost_price, v.selling_price, v.stock_quantity, v.max_discount
+    FROM products p
+    LEFT JOIN variants v ON p.id = v.product_id
+  `;
+
+  db.all(sql, [], (err, rows) => {
     if (err) {
       res.status(400).json({ error: err.message });
       return;
     }
-    res.json({ data: rows });
+
+    // Group variants by product
+    const productsMap = {};
+    rows.forEach(row => {
+      if (!productsMap[row.p_id]) {
+        productsMap[row.p_id] = {
+          id: row.p_id,
+          name: row.p_name,
+          category: row.category,
+          variants: []
+        };
+      }
+      if (row.v_id) {
+        productsMap[row.p_id].variants.push({
+          id: row.v_id,
+          name: row.variant_name,
+          sku: row.sku,
+          cost_price: row.cost_price,
+          selling_price: row.selling_price,
+          stock: row.stock_quantity,
+          max_discount: row.max_discount
+        });
+      }
+    });
+
+    res.json({ data: Object.values(productsMap) });
   });
 });
 
-// Add a new product
+// Add a new product with variants
 app.post('/api/products', (req, res) => {
-  const { name, category, sku, cost_price, selling_price, stock } = req.body;
-  const sql = 'INSERT INTO products (name, category, sku, cost_price, selling_price, stock) VALUES (?,?,?,?,?,?)';
-  const params = [name, category, sku, cost_price, selling_price, stock];
-  db.run(sql, params, function (err) {
-    if (err) {
-      res.status(400).json({ error: err.message });
-      return;
-    }
-    res.json({
-      message: 'success',
-      data: { id: this.lastID, ...req.body }
+  const { name, category, variants } = req.body;
+  // variants: [{ name, sku, cost_price, selling_price, stock, max_discount }]
+
+  if (!variants || variants.length === 0) {
+    return res.status(400).json({ error: 'At least one variant is required' });
+  }
+
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION');
+
+    db.run('INSERT INTO products (name, category) VALUES (?,?)', [name, category], function(err) {
+      if (err) {
+        db.run('ROLLBACK');
+        return res.status(400).json({ error: err.message });
+      }
+      const productId = this.lastID;
+
+      const stmt = db.prepare('INSERT INTO variants (product_id, variant_name, sku, cost_price, selling_price, stock_quantity, max_discount) VALUES (?,?,?,?,?,?,?)');
+
+      let errorOccurred = false;
+      variants.forEach(v => {
+        stmt.run(productId, v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, (err) => {
+          if (err) errorOccurred = true;
+        });
+      });
+
+      stmt.finalize(() => {
+        if (errorOccurred) {
+          db.run('ROLLBACK');
+          res.status(500).json({ error: 'Failed to save variants' });
+        } else {
+          db.run('COMMIT');
+          res.json({ message: 'success', id: productId });
+        }
+      });
     });
   });
 });
 
-// Delete a product
+// Update Product and Upsert Variants
+app.put('/api/products/:id', (req, res) => {
+  const { name, category, variants } = req.body;
+  const productId = req.params.id;
+
+  if (!variants || variants.length === 0) {
+    return res.status(400).json({ error: 'At least one variant is required' });
+  }
+
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION');
+
+    // Update Product
+    db.run('UPDATE products SET name = ?, category = ? WHERE id = ?', [name, category, productId], function(err) {
+      if (err) {
+        db.run('ROLLBACK');
+        return res.status(400).json({ error: err.message });
+      }
+
+      const stmtInsert = db.prepare('INSERT INTO variants (product_id, variant_name, sku, cost_price, selling_price, stock_quantity, max_discount) VALUES (?,?,?,?,?,?,?)');
+      const stmtUpdate = db.prepare('UPDATE variants SET variant_name = ?, sku = ?, cost_price = ?, selling_price = ?, stock_quantity = ?, max_discount = ? WHERE id = ?');
+
+      let errorOccurred = false;
+      let processed = 0;
+
+      variants.forEach(v => {
+        if (v.id) {
+          // Update existing
+          stmtUpdate.run(v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, v.id, (err) => {
+             if (err) errorOccurred = true;
+          });
+        } else {
+          // Insert new
+          stmtInsert.run(productId, v.name, v.sku, v.cost_price, v.selling_price, v.stock, v.max_discount || 0, (err) => {
+             if (err) errorOccurred = true;
+          });
+        }
+      });
+
+      stmtInsert.finalize();
+      stmtUpdate.finalize(() => {
+        if (errorOccurred) {
+          db.run('ROLLBACK');
+          res.status(500).json({ error: 'Failed to save variants' });
+        } else {
+          db.run('COMMIT');
+          res.json({ message: 'success' });
+        }
+      });
+    });
+  });
+});
+
+// Delete a product (and cascade variants)
 app.delete('/api/products/:id', (req, res) => {
+  // SQLite Foreign Key cascade should handle variants, but enforce logic here if needed
   db.run('DELETE FROM products WHERE id = ?', req.params.id, function (err) {
     if (err) {
       res.status(400).json({ error: err.message });
@@ -48,10 +157,21 @@ app.delete('/api/products/:id', (req, res) => {
   });
 });
 
-// Update stock (Restock)
-app.patch('/api/products/:id/stock', (req, res) => {
-  const { quantity } = req.body; // quantity to add
-  db.run('UPDATE products SET stock = stock + ? WHERE id = ?', [quantity, req.params.id], function (err) {
+// Delete a single variant
+app.delete('/api/variants/:id', (req, res) => {
+  db.run('DELETE FROM variants WHERE id = ?', req.params.id, function (err) {
+    if (err) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    res.json({ message: 'deleted', changes: this.changes });
+  });
+});
+
+// Update stock (Restock) - Now targets VARIANT ID
+app.patch('/api/variants/:id/stock', (req, res) => {
+  const { quantity } = req.body;
+  db.run('UPDATE variants SET stock_quantity = stock_quantity + ? WHERE id = ?', [quantity, req.params.id], function (err) {
     if (err) {
       res.status(400).json({ error: err.message });
       return;
@@ -62,16 +182,18 @@ app.patch('/api/products/:id/stock', (req, res) => {
 
 // Process a Sale
 app.post('/api/sales', (req, res) => {
-  const { items } = req.body; // items: [{ productId, quantity, price }]
+  const { items } = req.body; // items: [{ variantId, quantity, price, discount }]
+  // price here is the SOLD price (selling_price - discount_amount_per_unit ideally, or we calc it)
+  // Let's assume frontend sends final unit price and we calculate discount?
+  // Requirement: "Input Discount".
+  // Let's store discount_amount in DB.
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'No items in sale' });
   }
 
-  // Calculate total
-  const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+  const totalAmount = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-  // Start transaction (serialized)
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
 
@@ -83,35 +205,31 @@ app.post('/api/sales', (req, res) => {
       }
       const saleId = this.lastID;
 
-      // Prepare statements
-      const stmtItem = db.prepare('INSERT INTO sale_items (sale_id, product_id, quantity, price_at_sale, cost_at_sale) VALUES (?, ?, ?, ?, ?)');
-      const stmtUpdateStock = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?');
-      const stmtGetCost = db.prepare('SELECT cost_price FROM products WHERE id = ?');
-
-      // We need to process items sequentially to handle async cost lookup if we were in pure Node,
-      // but inside db.serialize/prepare/run in sqlite3, we can chain them.
-      // HOWEVER, retrieving data (SELECT) to use in INSERT within the same transaction requires care in sqlite3 node driver.
-      // A simpler approach for this prototype: Fetch costs first OR use a subquery in INSERT.
-      // Subquery approach: INSERT INTO sale_items ... SELECT ?, ?, ?, ?, cost_price FROM products WHERE id = ?
-
+      const stmtUpdateStock = db.prepare('UPDATE variants SET stock_quantity = stock_quantity - ? WHERE id = ?');
       let pending = items.length;
       let failed = false;
 
       items.forEach(item => {
         if (failed) return;
 
-        // Subquery approach is cleaner: Insert directly using the product's current cost_price
+        // Fetch cost from variant to log 'cost_at_sale'
+        // And we record the discount (assuming item.discount is % or amount? Requirement says "Discount %").
+        // Let's assume item.price is the FINAL price.
+        // And we need to calculate discount amount if needed, or just store what user gave.
+        // Let's assume frontend sends `discountAmount` (total for unit) or `discountPercent`.
+        // Let's stick to `discount_amount` per unit.
+
         db.run(
-          'INSERT INTO sale_items (sale_id, product_id, quantity, price_at_sale, cost_at_sale) SELECT ?, ?, ?, ?, cost_price FROM products WHERE id = ?',
-          [saleId, item.productId, item.quantity, item.price, item.productId],
+          `INSERT INTO sale_items (sale_id, variant_id, quantity, price_at_sale, cost_at_sale, discount_amount)
+           SELECT ?, ?, ?, ?, cost_price, ? FROM variants WHERE id = ?`,
+          [saleId, item.variantId, item.quantity, item.price, item.discount || 0, item.variantId],
           (err) => {
             if (err) {
               failed = true;
               console.error("Error inserting item:", err);
             }
 
-            // Update stock
-            stmtUpdateStock.run(item.quantity, item.productId, (err) => {
+            stmtUpdateStock.run(item.quantity, item.variantId, (err) => {
                if (err) failed = true;
 
                pending--;
@@ -133,24 +251,30 @@ app.post('/api/sales', (req, res) => {
 
       stmtUpdateStock.finalize();
       stmtSale.finalize();
-      // stmtItem is not used directly due to subquery run
     });
   });
 });
 
 // Get Sales Report
 app.get('/api/reports', (req, res) => {
-  const { startDate, endDate } = req.query; // Optional filters
+  const { startDate, endDate } = req.query;
 
   let sql = `
     SELECT
       sales.id,
       sales.total_amount,
       sales.sale_date,
-      json_group_array(json_object('name', products.name, 'quantity', sale_items.quantity, 'price', sale_items.price_at_sale)) as items
+      json_group_array(json_object(
+        'variant', variants.variant_name,
+        'product', products.name,
+        'quantity', sale_items.quantity,
+        'price', sale_items.price_at_sale,
+        'discount', sale_items.discount_amount
+      )) as items
     FROM sales
     JOIN sale_items ON sales.id = sale_items.sale_id
-    JOIN products ON sale_items.product_id = products.id
+    JOIN variants ON sale_items.variant_id = variants.id
+    JOIN products ON variants.product_id = products.id
   `;
 
   const params = [];
@@ -166,7 +290,6 @@ app.get('/api/reports', (req, res) => {
       res.status(400).json({ error: err.message });
       return;
     }
-    // Parse the JSON string from json_group_array
     const formattedRows = rows.map(row => ({
         ...row,
         items: JSON.parse(row.items)
@@ -175,35 +298,29 @@ app.get('/api/reports', (req, res) => {
   });
 });
 
-// Expenses API
+// Expenses & Drawings APIs (No schema change, just keep them)
 app.get('/api/expenses', (req, res) => {
   db.all('SELECT * FROM expenses ORDER BY expense_date DESC', [], (err, rows) => {
     if (err) return res.status(400).json({ error: err.message });
     res.json({ data: rows });
   });
 });
-
 app.post('/api/expenses', (req, res) => {
   const { description, category, amount } = req.body;
-  const sql = 'INSERT INTO expenses (description, category, amount) VALUES (?,?,?)';
-  db.run(sql, [description, category, amount], function(err) {
+  db.run('INSERT INTO expenses (description, category, amount) VALUES (?,?,?)', [description, category, amount], function(err) {
     if (err) return res.status(400).json({ error: err.message });
     res.json({ message: 'success', id: this.lastID });
   });
 });
-
-// Drawings API
 app.get('/api/drawings', (req, res) => {
   db.all('SELECT * FROM drawings ORDER BY drawing_date DESC', [], (err, rows) => {
     if (err) return res.status(400).json({ error: err.message });
     res.json({ data: rows });
   });
 });
-
 app.post('/api/drawings', (req, res) => {
   const { description, amount } = req.body;
-  const sql = 'INSERT INTO drawings (description, amount) VALUES (?,?)';
-  db.run(sql, [description, amount], function(err) {
+  db.run('INSERT INTO drawings (description, amount) VALUES (?,?)', [description, amount], function(err) {
     if (err) return res.status(400).json({ error: err.message });
     res.json({ message: 'success', id: this.lastID });
   });
@@ -224,8 +341,6 @@ app.get('/api/pnl', (req, res) => {
     params.push(startDate, endDate);
   }
 
-  // We need to run parallel queries. Promise.all is best here.
-  // Helper to promisify db.get
   const getAsync = (sql, params) => new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
   });
@@ -263,5 +378,11 @@ app.get('/api/pnl', (req, res) => {
   });
 });
 
-// Export for Vercel
+if (require.main === module) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
 module.exports = app;

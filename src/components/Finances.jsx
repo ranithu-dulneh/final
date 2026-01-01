@@ -69,34 +69,34 @@ export default function Finances() {
           <div className="space-y-4">
              <div className="flex justify-between text-lg">
                 <span className="font-semibold text-gray-700">Total Revenue (Sales)</span>
-                <span className="font-bold text-gray-900">${pnlData.revenue.toFixed(2)}</span>
+                <span className="font-bold text-gray-900">Rs. {pnlData.revenue.toFixed(2)}</span>
              </div>
              <div className="flex justify-between text-red-600">
                 <span>Cost of Goods Sold (COGS)</span>
-                <span>- ${pnlData.cogs.toFixed(2)}</span>
+                <span>- Rs. {pnlData.cogs.toFixed(2)}</span>
              </div>
              <div className="flex justify-between text-xl font-bold border-t pt-2">
                 <span>Gross Profit</span>
-                <span>${pnlData.grossProfit.toFixed(2)}</span>
+                <span>Rs. {pnlData.grossProfit.toFixed(2)}</span>
              </div>
 
              <div className="py-4">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Expenses</h3>
                 <div className="flex justify-between text-red-600 pl-4">
                    <span>Total Expenses</span>
-                   <span>- ${pnlData.totalExpenses.toFixed(2)}</span>
+                   <span>- Rs. {pnlData.totalExpenses.toFixed(2)}</span>
                 </div>
              </div>
 
              <div className="flex justify-between text-2xl font-bold border-t border-b py-4 bg-gray-50 p-4 rounded">
                 <span>Net Profit</span>
-                <span className={pnlData.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}>${pnlData.netProfit.toFixed(2)}</span>
+                <span className={pnlData.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}>Rs. {pnlData.netProfit.toFixed(2)}</span>
              </div>
 
              <div className="mt-8 pt-4 border-t border-dashed text-gray-500 text-sm">
                 <div className="flex justify-between">
                    <span>Owner Drawings (Cash Out)</span>
-                   <span>${pnlData.totalDrawings.toFixed(2)}</span>
+                   <span>Rs. {pnlData.totalDrawings.toFixed(2)}</span>
                 </div>
                 <p className="text-xs mt-1">* Drawings are equity withdrawals and do not reduce Net Profit.</p>
              </div>
@@ -125,7 +125,7 @@ export default function Finances() {
                     </select>
                  </div>
                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Amount ($)</label>
+                    <label className="block text-sm font-medium text-gray-700">Amount (Rs.)</label>
                     <input
                       type="number" step="0.01" required
                       className="w-full p-2 border rounded"
@@ -163,7 +163,7 @@ export default function Finances() {
                           <td className="py-2 text-sm">{new Date(e.expense_date).toLocaleDateString()}</td>
                           <td className="py-2 text-sm font-medium">{e.category}</td>
                           <td className="py-2 text-sm text-gray-500">{e.description}</td>
-                          <td className="py-2 text-sm font-bold text-right">${e.amount.toFixed(2)}</td>
+                          <td className="py-2 text-sm font-bold text-right">Rs. {e.amount.toFixed(2)}</td>
                        </tr>
                     ))}
                  </tbody>
@@ -178,7 +178,7 @@ export default function Finances() {
               <h3 className="text-lg font-bold mb-4">Record Owner Drawing</h3>
               <form onSubmit={handleAddDrawing} className="space-y-4">
                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Amount ($)</label>
+                    <label className="block text-sm font-medium text-gray-700">Amount (Rs.)</label>
                     <input
                       type="number" step="0.01" required
                       className="w-full p-2 border rounded"
@@ -214,7 +214,7 @@ export default function Finances() {
                        <tr key={d.id} className="border-t">
                           <td className="py-2 text-sm">{new Date(d.drawing_date).toLocaleDateString()}</td>
                           <td className="py-2 text-sm text-gray-500">{d.description}</td>
-                          <td className="py-2 text-sm font-bold text-right">${d.amount.toFixed(2)}</td>
+                          <td className="py-2 text-sm font-bold text-right">Rs. {d.amount.toFixed(2)}</td>
                        </tr>
                     ))}
                  </tbody>

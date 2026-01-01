@@ -1,6 +1,5 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const fs = require('fs');
 
 // Vercel only allows writing to /tmp
 const dbPath = process.env.VERCEL ? '/tmp/pos.db' : path.resolve(__dirname, 'pos.db');
@@ -10,23 +9,30 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.error('Error opening database ' + dbPath + ': ' + err.message);
   } else {
     console.log('Connected to the SQLite database at ' + dbPath);
-    // Always attempt to initialize tables on connection
-    // SQLite's "IF NOT EXISTS" makes this safe to run every time
     initDb();
   }
 });
 
 const initDb = () => {
   db.serialize(() => {
-    // Products Table
+    // Products Table (Parent)
     db.run(`CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      category TEXT,
+      category TEXT
+    )`);
+
+    // Variants Table (Child)
+    db.run(`CREATE TABLE IF NOT EXISTS variants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER,
+      variant_name TEXT NOT NULL,
       sku TEXT UNIQUE,
       cost_price REAL,
       selling_price REAL,
-      stock INTEGER DEFAULT 0
+      stock_quantity INTEGER DEFAULT 0,
+      max_discount REAL DEFAULT 0,
+      FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
     )`);
 
     // Sales Table
@@ -40,12 +46,13 @@ const initDb = () => {
     db.run(`CREATE TABLE IF NOT EXISTS sale_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sale_id INTEGER,
-      product_id INTEGER,
+      variant_id INTEGER,
       quantity INTEGER,
       price_at_sale REAL,
       cost_at_sale REAL,
+      discount_amount REAL DEFAULT 0,
       FOREIGN KEY(sale_id) REFERENCES sales(id),
-      FOREIGN KEY(product_id) REFERENCES products(id)
+      FOREIGN KEY(variant_id) REFERENCES variants(id)
     )`);
 
     // Expenses Table
@@ -65,7 +72,7 @@ const initDb = () => {
       drawing_date TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    console.log('Database tables initialized (if they did not exist).');
+    console.log('Database tables initialized.');
   });
 };
 
