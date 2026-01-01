@@ -4,7 +4,7 @@ const bodyParser = require('body-parser');
 const { db } = require('./database');
 
 const app = express();
-const PORT = 3001;
+// const PORT = 3001; // Removed for Vercel
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -142,6 +142,5 @@ app.get('/api/reports', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Export for Vercel
+module.exports = app;

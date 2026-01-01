@@ -6,7 +6,7 @@ export default function Reports() {
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
 
   const fetchReports = async (startDate, endDate) => {
-    let url = 'http://localhost:3001/api/reports';
+    let url = '/api/reports';
     if (startDate && endDate) {
       url += `?startDate=${startDate}&endDate=${endDate}`;
     }

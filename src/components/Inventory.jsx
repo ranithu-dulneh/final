@@ -10,7 +10,7 @@ export default function Inventory() {
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch('http://localhost:3001/api/products');
+      const res = await fetch('/api/products');
       const data = await res.json();
       if (data.data) setProducts(data.data);
     } catch (error) {
@@ -31,7 +31,7 @@ export default function Inventory() {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch('http://localhost:3001/api/products', {
+      const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -52,7 +52,7 @@ export default function Inventory() {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this product?')) return;
     try {
-      await fetch(`http://localhost:3001/api/products/${id}`, { method: 'DELETE' });
+      await fetch(`/api/products/${id}`, { method: 'DELETE' });
       fetchProducts();
     } catch (error) {
       console.error('Error deleting product', error);
@@ -63,7 +63,7 @@ export default function Inventory() {
     const quantity = prompt('Enter quantity to add:');
     if (!quantity || isNaN(quantity)) return;
     try {
-      await fetch(`http://localhost:3001/api/products/${id}/stock`, {
+      await fetch(`/api/products/${id}/stock`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: parseInt(quantity) })

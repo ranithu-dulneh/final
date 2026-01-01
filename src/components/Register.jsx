@@ -9,7 +9,7 @@ export default function Register() {
   const [lastSale, setLastSale] = useState(null);
 
   useEffect(() => {
-    fetch('http://localhost:3001/api/products')
+    fetch('/api/products')
       .then(res => res.json())
       .then(data => {
         if (data.data) setProducts(data.data);
@@ -68,7 +68,7 @@ export default function Register() {
     };
 
     try {
-      const res = await fetch('http://localhost:3001/api/sales', {
+      const res = await fetch('/api/sales', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(saleData)
@@ -85,7 +85,7 @@ export default function Register() {
         });
         setCart([]);
         // Refresh products to get new stock levels
-        fetch('http://localhost:3001/api/products')
+        fetch('/api/products')
           .then(res => res.json())
           .then(data => setProducts(data.data || []));
 
