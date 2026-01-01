@@ -43,8 +43,26 @@ const initDb = () => {
       product_id INTEGER,
       quantity INTEGER,
       price_at_sale REAL,
+      cost_at_sale REAL,
       FOREIGN KEY(sale_id) REFERENCES sales(id),
       FOREIGN KEY(product_id) REFERENCES products(id)
+    )`);
+
+    // Expenses Table
+    db.run(`CREATE TABLE IF NOT EXISTS expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      description TEXT,
+      category TEXT,
+      amount REAL,
+      expense_date TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Drawings Table
+    db.run(`CREATE TABLE IF NOT EXISTS drawings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      description TEXT,
+      amount REAL,
+      drawing_date TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
 
     console.log('Database tables initialized (if they did not exist).');

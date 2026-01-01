@@ -83,24 +83,57 @@ app.post('/api/sales', (req, res) => {
       }
       const saleId = this.lastID;
 
-      const stmtItem = db.prepare('INSERT INTO sale_items (sale_id, product_id, quantity, price_at_sale) VALUES (?, ?, ?, ?)');
+      // Prepare statements
+      const stmtItem = db.prepare('INSERT INTO sale_items (sale_id, product_id, quantity, price_at_sale, cost_at_sale) VALUES (?, ?, ?, ?, ?)');
       const stmtUpdateStock = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?');
+      const stmtGetCost = db.prepare('SELECT cost_price FROM products WHERE id = ?');
+
+      // We need to process items sequentially to handle async cost lookup if we were in pure Node,
+      // but inside db.serialize/prepare/run in sqlite3, we can chain them.
+      // HOWEVER, retrieving data (SELECT) to use in INSERT within the same transaction requires care in sqlite3 node driver.
+      // A simpler approach for this prototype: Fetch costs first OR use a subquery in INSERT.
+      // Subquery approach: INSERT INTO sale_items ... SELECT ?, ?, ?, ?, cost_price FROM products WHERE id = ?
+
+      let pending = items.length;
+      let failed = false;
 
       items.forEach(item => {
-        stmtItem.run(saleId, item.productId, item.quantity, item.price);
-        stmtUpdateStock.run(item.quantity, item.productId);
+        if (failed) return;
+
+        // Subquery approach is cleaner: Insert directly using the product's current cost_price
+        db.run(
+          'INSERT INTO sale_items (sale_id, product_id, quantity, price_at_sale, cost_at_sale) SELECT ?, ?, ?, ?, cost_price FROM products WHERE id = ?',
+          [saleId, item.productId, item.quantity, item.price, item.productId],
+          (err) => {
+            if (err) {
+              failed = true;
+              console.error("Error inserting item:", err);
+            }
+
+            // Update stock
+            stmtUpdateStock.run(item.quantity, item.productId, (err) => {
+               if (err) failed = true;
+
+               pending--;
+               if (pending === 0) {
+                 if (failed) {
+                   db.run('ROLLBACK');
+                   res.status(500).json({ error: 'Transaction failed' });
+                 } else {
+                   db.run('COMMIT', (err) => {
+                     if (err) return res.status(500).json({ error: err.message });
+                     res.json({ message: 'Sale completed', saleId });
+                   });
+                 }
+               }
+            });
+          }
+        );
       });
 
-      stmtItem.finalize();
       stmtUpdateStock.finalize();
       stmtSale.finalize();
-
-      db.run('COMMIT', (err) => {
-        if (err) {
-           return res.status(500).json({ error: err.message });
-        }
-        res.json({ message: 'Sale completed', saleId });
-      });
+      // stmtItem is not used directly due to subquery run
     });
   });
 });
@@ -139,6 +172,94 @@ app.get('/api/reports', (req, res) => {
         items: JSON.parse(row.items)
     }));
     res.json({ data: formattedRows });
+  });
+});
+
+// Expenses API
+app.get('/api/expenses', (req, res) => {
+  db.all('SELECT * FROM expenses ORDER BY expense_date DESC', [], (err, rows) => {
+    if (err) return res.status(400).json({ error: err.message });
+    res.json({ data: rows });
+  });
+});
+
+app.post('/api/expenses', (req, res) => {
+  const { description, category, amount } = req.body;
+  const sql = 'INSERT INTO expenses (description, category, amount) VALUES (?,?,?)';
+  db.run(sql, [description, category, amount], function(err) {
+    if (err) return res.status(400).json({ error: err.message });
+    res.json({ message: 'success', id: this.lastID });
+  });
+});
+
+// Drawings API
+app.get('/api/drawings', (req, res) => {
+  db.all('SELECT * FROM drawings ORDER BY drawing_date DESC', [], (err, rows) => {
+    if (err) return res.status(400).json({ error: err.message });
+    res.json({ data: rows });
+  });
+});
+
+app.post('/api/drawings', (req, res) => {
+  const { description, amount } = req.body;
+  const sql = 'INSERT INTO drawings (description, amount) VALUES (?,?)';
+  db.run(sql, [description, amount], function(err) {
+    if (err) return res.status(400).json({ error: err.message });
+    res.json({ message: 'success', id: this.lastID });
+  });
+});
+
+// P&L Report API
+app.get('/api/pnl', (req, res) => {
+  const { startDate, endDate } = req.query;
+  const params = [];
+  let dateFilterSales = '';
+  let dateFilterExpenses = '';
+  let dateFilterDrawings = '';
+
+  if (startDate && endDate) {
+    dateFilterSales = ' WHERE sale_date BETWEEN ? AND ?';
+    dateFilterExpenses = ' WHERE expense_date BETWEEN ? AND ?';
+    dateFilterDrawings = ' WHERE drawing_date BETWEEN ? AND ?';
+    params.push(startDate, endDate);
+  }
+
+  // We need to run parallel queries. Promise.all is best here.
+  // Helper to promisify db.get
+  const getAsync = (sql, params) => new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+  });
+
+  const p1 = getAsync(`
+    SELECT
+      SUM(sale_items.price_at_sale * sale_items.quantity) as revenue,
+      SUM(COALESCE(sale_items.cost_at_sale, 0) * sale_items.quantity) as cogs
+    FROM sale_items
+    JOIN sales ON sales.id = sale_items.sale_id
+    ${dateFilterSales}
+  `, startDate && endDate ? [startDate, endDate] : []);
+
+  const p2 = getAsync(`SELECT SUM(amount) as total_expenses FROM expenses ${dateFilterExpenses}`, startDate && endDate ? [startDate, endDate] : []);
+  const p3 = getAsync(`SELECT SUM(amount) as total_drawings FROM drawings ${dateFilterDrawings}`, startDate && endDate ? [startDate, endDate] : []);
+
+  Promise.all([p1, p2, p3]).then(([salesData, expenseData, drawingData]) => {
+    const revenue = salesData?.revenue || 0;
+    const cogs = salesData?.cogs || 0;
+    const grossProfit = revenue - cogs;
+    const totalExpenses = expenseData?.total_expenses || 0;
+    const netProfit = grossProfit - totalExpenses;
+    const totalDrawings = drawingData?.total_drawings || 0;
+
+    res.json({
+      revenue,
+      cogs,
+      grossProfit,
+      totalExpenses,
+      netProfit,
+      totalDrawings
+    });
+  }).catch(err => {
+    res.status(500).json({ error: err.message });
   });
 });
 
