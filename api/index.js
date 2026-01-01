@@ -19,7 +19,8 @@ app.get('/api/products', (req, res) => {
 
   db.all(sql, [], (err, rows) => {
     if (err) {
-      res.status(400).json({ error: err.message });
+      console.error("Error fetching products:", err);
+      res.status(500).json({ error: "Database error: " + err.message });
       return;
     }
 

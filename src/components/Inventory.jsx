@@ -14,14 +14,18 @@ export default function Inventory() {
   const [message, setMessage] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editProductId, setEditProductId] = useState(null);
+  const [fetchError, setFetchError] = useState(false);
 
   const fetchProducts = async () => {
+    setFetchError(false);
     try {
       const res = await fetch('/api/products');
+      if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       if (data.data) setProducts(data.data);
     } catch (error) {
       console.error('Error fetching products:', error);
+      setFetchError(true);
     }
   };
 
@@ -279,7 +283,13 @@ export default function Inventory() {
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold mb-4">Inventory List</h2>
+        <div className="flex justify-between items-center mb-4">
+           <h2 className="text-xl font-semibold">Inventory List</h2>
+           <button onClick={fetchProducts} className="text-sm text-blue-600 hover:underline">Refresh</button>
+        </div>
+
+        {fetchError && <p className="text-red-500 mb-2">Error loading inventory. Check connection.</p>}
+
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">

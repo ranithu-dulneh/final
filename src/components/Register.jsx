@@ -157,19 +157,29 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [lastSale, setLastSale] = useState(null);
+  const [fetchError, setFetchError] = useState(false);
+
+  const fetchData = async () => {
+    setFetchError(false);
+    try {
+      const prodRes = await fetch('/api/products');
+      if (!prodRes.ok) throw new Error("Failed to fetch products");
+      const prodData = await prodRes.json();
+      if (prodData.data) setProducts(prodData.data);
+
+      const catRes = await fetch('/api/categories');
+      if (catRes.ok) {
+         const catData = await catRes.json();
+         if (catData.data) setCategories(catData.data);
+      }
+    } catch (e) {
+      console.error(e);
+      setFetchError(true);
+    }
+  };
 
   useEffect(() => {
-    fetch('/api/products')
-      .then(res => res.json())
-      .then(data => {
-        if (data.data) setProducts(data.data);
-      });
-
-    fetch('/api/categories')
-      .then(res => res.json())
-      .then(data => {
-         if (data.data) setCategories(data.data);
-      });
+    fetchData();
   }, []);
 
   const filteredProducts = products.filter(p => {
@@ -304,6 +314,13 @@ export default function Register() {
              ))}
           </div>
         </div>
+
+        {fetchError && (
+          <div className="p-4 text-center">
+            <p className="text-red-500 mb-2">Error loading data.</p>
+            <button onClick={fetchData} className="bg-blue-600 text-white px-4 py-2 rounded">Retry</button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 p-1">
           {filteredProducts.map(product => (
