@@ -5,14 +5,14 @@ const fs = require('fs');
 // Vercel only allows writing to /tmp
 const dbPath = process.env.VERCEL ? '/tmp/pos.db' : path.resolve(__dirname, 'pos.db');
 
-// In Vercel, we need to initialize the DB if it doesn't exist in /tmp
-const needsInit = process.env.VERCEL && !fs.existsSync(dbPath);
-
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database ' + dbPath + ': ' + err.message);
   } else {
     console.log('Connected to the SQLite database at ' + dbPath);
+    // Always attempt to initialize tables on connection
+    // SQLite's "IF NOT EXISTS" makes this safe to run every time
+    initDb();
   }
 });
 
@@ -47,13 +47,8 @@ const initDb = () => {
       FOREIGN KEY(product_id) REFERENCES products(id)
     )`);
 
-    console.log('Database tables initialized.');
+    console.log('Database tables initialized (if they did not exist).');
   });
 };
-
-// Initialize if it's the first run in this container or local
-if (require.main === module || needsInit) {
-  initDb();
-}
 
 module.exports = { db, initDb };

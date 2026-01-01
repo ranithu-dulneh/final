@@ -41,10 +41,11 @@ export default function Inventory() {
         setFormData({ name: '', category: '', sku: '', cost_price: '', selling_price: '', stock: '' });
         fetchProducts();
       } else {
-        setMessage('Error adding product');
+        const errData = await res.json().catch(() => ({ error: res.statusText }));
+        setMessage('Error: ' + (errData.error || res.status));
       }
     } catch (error) {
-      setMessage('Error connecting to server');
+      setMessage('Error connecting to server: ' + error.message);
     }
     setLoading(false);
   };
