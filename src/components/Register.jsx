@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import PinModal from './PinModal'; // Reusing or creating new if not exists, wait, need to check if PinModal exists.
-// Assuming PinModal logic is simple, I will include logic inline or create it if needed.
-// Actually, PinModal.jsx exists from `list_files` earlier.
+import PinModal from './PinModal'; // Ensure this is available if used, or use inline logic
 
-// Product Selection Modal Component
+// Inline ProductModal (same as before but we should keep it)
 function ProductModal({ product, onClose, onConfirm }) {
   const [selectedVariantId, setSelectedVariantId] = useState(product.variants[0]?.id || null);
   const [quantity, setQuantity] = useState(1);
@@ -25,9 +23,6 @@ function ProductModal({ product, onClose, onConfirm }) {
       alert("Insufficient stock!");
       return;
     }
-
-    // If Special Discount is checked, we assume PIN was already verified when the checkbox was clicked (or we verify now).
-    // Let's verify now if discount > maxDiscount and special is not enabled? No, UI says check special to enable high discount.
 
     if (discount > maxDiscount && !isSpecialDiscount) {
       alert(`Discount exceeds maximum allowed (${maxDiscount}%). Enable Special Discount to override.`);
@@ -129,9 +124,6 @@ function ProductModal({ product, onClose, onConfirm }) {
       </div>
 
       {showPin && (
-         // Simple prompt for now, or reuse PinModal if exported properly.
-         // Since I cannot easily import a default export inside a function component file without proper structure,
-         // I'll implement a simple pin check here or use a portal.
          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-60">
             <div className="bg-white p-6 rounded shadow-lg text-center">
                <h3 className="mb-4 font-bold">Admin Authorization</h3>
@@ -157,8 +149,10 @@ function ProductModal({ product, onClose, onConfirm }) {
 
 export default function Register() {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -170,21 +164,26 @@ export default function Register() {
       .then(data => {
         if (data.data) setProducts(data.data);
       });
+
+    fetch('/api/categories')
+      .then(res => res.json())
+      .then(data => {
+         if (data.data) setCategories(data.data);
+      });
   }, []);
 
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.variants.some(v => v.sku.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
+                          p.variants.some(v => v.sku.toLowerCase().includes(search.toLowerCase()));
+    const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   const addToCart = (itemData) => {
-    // itemData: { productName, variantId, variantName, price, quantity, discount, finalPrice }
-
     // Check if variant already in cart
     const existing = cart.find(c => c.variantId === itemData.variantId && c.discount === itemData.discount);
 
     if (existing) {
-      // Update quantity
        const newCart = cart.map(c =>
          (c.variantId === itemData.variantId && c.discount === itemData.discount)
          ? { ...c, quantity: c.quantity + itemData.quantity }
@@ -192,7 +191,7 @@ export default function Register() {
        );
        setCart(newCart);
     } else {
-       setCart([...cart, { ...itemData, id: Date.now() }]); // Add unique ID for React key if needed
+       setCart([...cart, { ...itemData, id: Date.now() }]);
     }
   };
 
@@ -200,10 +199,7 @@ export default function Register() {
     setCart(cart.filter((_, i) => i !== index));
   };
 
-  const total = cart.reduce((sum, item) => sum + (item.finalPrice * item.quantity), 0); // finalPrice is already discounted unit price * qty? No wait.
-  // In ProductModal: finalTotal = discountedPrice * quantity.
-  // We passed `finalPrice` as `discountedPrice` (unit price after discount).
-  // So Cart Total = sum(item.finalPrice * item.quantity).
+  const total = cart.reduce((sum, item) => sum + (item.finalPrice * item.quantity), 0);
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
@@ -213,8 +209,8 @@ export default function Register() {
       items: cart.map(item => ({
         variantId: item.variantId,
         quantity: item.quantity,
-        price: item.finalPrice, // This is the unit price at sale (sold price)
-        discount: (item.price - item.finalPrice) // Store discount amount per unit
+        price: item.finalPrice,
+        discount: (item.price - item.finalPrice)
       }))
     };
 
@@ -280,7 +276,8 @@ export default function Register() {
     <div className="flex flex-col lg:flex-row gap-6 h-full">
       {/* Product Grid */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        <div className="mb-4">
+        {/* Search & Categories */}
+        <div className="mb-4 space-y-3">
           <input
             type="text"
             placeholder="Search by Name or SKU..."
@@ -288,7 +285,26 @@ export default function Register() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+
+          <div className="flex flex-wrap gap-2">
+             <button
+               onClick={() => setSelectedCategory('All')}
+               className={`px-3 py-1 rounded-full text-sm font-medium border transition-colors ${selectedCategory === 'All' ? 'bg-brand-green text-white border-brand-green' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+             >
+               All
+             </button>
+             {categories.map(cat => (
+               <button
+                 key={cat.id}
+                 onClick={() => setSelectedCategory(cat.name)}
+                 className={`px-3 py-1 rounded-full text-sm font-medium border transition-colors ${selectedCategory === cat.name ? 'bg-brand-green text-white border-brand-green' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+               >
+                 {cat.name}
+               </button>
+             ))}
+          </div>
         </div>
+
         <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 p-1">
           {filteredProducts.map(product => (
             <div
@@ -298,13 +314,19 @@ export default function Register() {
             >
               <div>
                 <h3 className="font-bold text-gray-800">{product.name}</h3>
-                <p className="text-xs text-gray-500">{product.variants.length} Variants</p>
+                <p className="text-xs text-gray-500 mb-1">{product.category}</p>
+                <p className="text-xs text-gray-400">{product.variants.length} Variants</p>
               </div>
               <div className="mt-2 text-right">
                 <span className="text-sm font-semibold text-brand-green">Select &gt;</span>
               </div>
             </div>
           ))}
+          {filteredProducts.length === 0 && (
+             <div className="col-span-full text-center text-gray-400 py-10">
+                No products found.
+             </div>
+          )}
         </div>
       </div>
 

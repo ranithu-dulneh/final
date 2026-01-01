@@ -72,6 +72,20 @@ const initDb = () => {
       drawing_date TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Categories Table
+    db.run(`CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL
+    )`, (err) => {
+       if (!err) {
+         // Seed default categories if they don't exist
+         const defaults = ['Fertilizer', 'Seeds', 'Chemicals', 'Pet Accessories', 'Other Accessories'];
+         const stmt = db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)');
+         defaults.forEach(c => stmt.run(c));
+         stmt.finalize();
+       }
+    });
+
     console.log('Database tables initialized.');
   });
 };

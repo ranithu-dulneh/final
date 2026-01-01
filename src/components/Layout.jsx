@@ -74,8 +74,8 @@ export default function Layout() {
       {/* Sidebar for Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-white shadow-lg border-r border-gray-200">
         <div className="p-6 border-b border-gray-100">
-          <h1 className="text-2xl font-bold text-brand-green">Thusitha<span className="text-brand-gold">.Store</span></h1>
-          <p className="text-xs text-gray-400 mt-1">Chemical Stores Management</p>
+          <h1 className="text-2xl font-bold text-brand-green">Thusitha<span className="text-brand-gold"> Chemical Stores</span></h1>
+          <p className="text-xs text-gray-400 mt-1">Management System</p>
         </div>
         <nav className="flex-1 p-4 space-y-2">
           {navItems.map((item) => (
@@ -99,7 +99,7 @@ export default function Layout() {
 
       {/* Mobile Header & Menu */}
       <div className="md:hidden fixed top-0 w-full bg-white shadow-sm z-50 flex justify-between items-center p-4">
-        <h1 className="text-xl font-bold text-brand-green">Thusitha<span className="text-brand-gold">.Store</span></h1>
+        <h1 className="text-xl font-bold text-brand-green">Thusitha<span className="text-brand-gold"> Chemical Stores</span></h1>
         <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 text-gray-600">
            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 export default function Inventory() {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [formData, setFormData] = useState({
     name: '', category: ''
   });
@@ -24,12 +25,49 @@ export default function Inventory() {
     }
   };
 
+  const fetchCategories = async () => {
+    try {
+      const res = await fetch('/api/categories');
+      const data = await res.json();
+      if (data.data) {
+        setCategories(data.data);
+        // Set default category if not set
+        if (!formData.category && data.data.length > 0) {
+            setFormData(prev => ({ ...prev, category: data.data[0].name }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
   }, []);
 
   const handleProductChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleAddCategory = async () => {
+    const newCat = prompt("Enter new category name:");
+    if (!newCat) return;
+    try {
+      const res = await fetch('/api/categories', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ name: newCat })
+      });
+      if (res.ok) {
+        fetchCategories();
+        setFormData({ ...formData, category: newCat });
+      } else {
+        alert("Failed to add category");
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleVariantChange = (e) => {
@@ -71,8 +109,14 @@ export default function Inventory() {
     setLoading(true);
     setMessage('');
 
+    // Ensure category is set (if user didn't change dropdown from default)
+    const payload = {
+        ...formData,
+        category: formData.category || (categories[0]?.name || 'Uncategorized'),
+        variants
+    };
+
     try {
-      const payload = { ...formData, variants };
       let res;
       if (isEditing) {
         res = await fetch(`/api/products/${editProductId}`, {
@@ -103,7 +147,7 @@ export default function Inventory() {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', category: '' });
+    setFormData({ name: '', category: categories[0]?.name || '' });
     setVariants([]);
     setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '' });
     setIsEditing(false);
@@ -169,7 +213,19 @@ export default function Inventory() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input name="name" placeholder="Product Name" value={formData.name} onChange={handleProductChange} className="p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none" required />
-            <input name="category" placeholder="Category" value={formData.category} onChange={handleProductChange} className="p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none" />
+
+            <div className="flex gap-2">
+                <select
+                    name="category"
+                    value={formData.category}
+                    onChange={handleProductChange}
+                    className="p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none flex-1 bg-white"
+                >
+                    {categories.length === 0 && <option>Loading...</option>}
+                    {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                <button type="button" onClick={handleAddCategory} className="bg-gray-200 text-gray-700 px-3 rounded hover:bg-gray-300">+</button>
+            </div>
           </div>
 
           <div className="bg-gray-50 p-4 rounded border border-gray-200">

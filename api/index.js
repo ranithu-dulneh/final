@@ -51,6 +51,24 @@ app.get('/api/products', (req, res) => {
   });
 });
 
+// Get Categories
+app.get('/api/categories', (req, res) => {
+  db.all('SELECT * FROM categories ORDER BY name', [], (err, rows) => {
+    if (err) return res.status(400).json({ error: err.message });
+    res.json({ data: rows });
+  });
+});
+
+// Add Category
+app.post('/api/categories', (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  db.run('INSERT INTO categories (name) VALUES (?)', [name], function(err) {
+    if (err) return res.status(400).json({ error: err.message });
+    res.json({ message: 'success', id: this.lastID, name });
+  });
+});
+
 // Add a new product with variants
 app.post('/api/products', (req, res) => {
   const { name, category, variants } = req.body;
@@ -182,11 +200,7 @@ app.patch('/api/variants/:id/stock', (req, res) => {
 
 // Process a Sale
 app.post('/api/sales', (req, res) => {
-  const { items } = req.body; // items: [{ variantId, quantity, price, discount }]
-  // price here is the SOLD price (selling_price - discount_amount_per_unit ideally, or we calc it)
-  // Let's assume frontend sends final unit price and we calculate discount?
-  // Requirement: "Input Discount".
-  // Let's store discount_amount in DB.
+  const { items } = req.body;
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'No items in sale' });
@@ -194,65 +208,47 @@ app.post('/api/sales', (req, res) => {
 
   const totalAmount = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-
-    const stmtSale = db.prepare('INSERT INTO sales (total_amount) VALUES (?)');
-    stmtSale.run(totalAmount, function(err) {
-      if (err) {
-        db.run('ROLLBACK');
-        return res.status(500).json({ error: err.message });
-      }
-      const saleId = this.lastID;
-
-      const stmtUpdateStock = db.prepare('UPDATE variants SET stock_quantity = stock_quantity - ? WHERE id = ?');
-      let pending = items.length;
-      let failed = false;
-
-      items.forEach(item => {
-        if (failed) return;
-
-        // Fetch cost from variant to log 'cost_at_sale'
-        // And we record the discount (assuming item.discount is % or amount? Requirement says "Discount %").
-        // Let's assume item.price is the FINAL price.
-        // And we need to calculate discount amount if needed, or just store what user gave.
-        // Let's assume frontend sends `discountAmount` (total for unit) or `discountPercent`.
-        // Let's stick to `discount_amount` per unit.
-
-        db.run(
-          `INSERT INTO sale_items (sale_id, variant_id, quantity, price_at_sale, cost_at_sale, discount_amount)
-           SELECT ?, ?, ?, ?, cost_price, ? FROM variants WHERE id = ?`,
-          [saleId, item.variantId, item.quantity, item.price, item.discount || 0, item.variantId],
-          (err) => {
-            if (err) {
-              failed = true;
-              console.error("Error inserting item:", err);
-            }
-
-            stmtUpdateStock.run(item.quantity, item.variantId, (err) => {
-               if (err) failed = true;
-
-               pending--;
-               if (pending === 0) {
-                 if (failed) {
-                   db.run('ROLLBACK');
-                   res.status(500).json({ error: 'Transaction failed' });
-                 } else {
-                   db.run('COMMIT', (err) => {
-                     if (err) return res.status(500).json({ error: err.message });
-                     res.json({ message: 'Sale completed', saleId });
-                   });
-                 }
-               }
-            });
-          }
-        );
-      });
-
-      stmtUpdateStock.finalize();
-      stmtSale.finalize();
+  // Helper for promisified DB run
+  const runAsync = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) reject(err);
+      else resolve(this);
     });
   });
+
+  // We need to execute strictly sequentially for the transaction to be safe and logic clear
+  (async () => {
+    try {
+      await runAsync('BEGIN TRANSACTION');
+
+      const result = await runAsync('INSERT INTO sales (total_amount) VALUES (?)', [totalAmount]);
+      const saleId = result.lastID;
+
+      for (const item of items) {
+        // 1. Insert Sale Item (using subquery to get cost_price)
+        const insertResult = await runAsync(
+          `INSERT INTO sale_items (sale_id, variant_id, quantity, price_at_sale, cost_at_sale, discount_amount)
+           SELECT ?, ?, ?, ?, cost_price, ? FROM variants WHERE id = ?`,
+          [saleId, item.variantId, item.quantity, item.price, item.discount || 0, item.variantId]
+        );
+
+        if (insertResult.changes === 0) {
+           throw new Error(`Variant ID ${item.variantId} not found`);
+        }
+
+        // 2. Update stock
+        await runAsync('UPDATE variants SET stock_quantity = stock_quantity - ? WHERE id = ?', [item.quantity, item.variantId]);
+      }
+
+      await runAsync('COMMIT');
+      res.json({ message: 'Sale completed', saleId });
+
+    } catch (err) {
+      console.error("Transaction Error:", err);
+      await runAsync('ROLLBACK').catch(e => console.error("Rollback failed:", e));
+      res.status(500).json({ error: 'Transaction failed: ' + err.message });
+    }
+  })();
 });
 
 // Get Sales Report
