@@ -179,7 +179,7 @@ export default function Creditors() {
                         <td className="px-6 py-4 whitespace-nowrap text-center space-x-2">
                             <button
                                 onClick={() => setViewingProfile(creditor)}
-                                className="text-brand-green hover:underline text-sm font-medium"
+                                className="border border-brand-green text-brand-green px-3 py-1 rounded text-sm font-medium hover:bg-green-50 transition-colors"
                             >
                                 Profile
                             </button>

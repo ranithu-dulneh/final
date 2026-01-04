@@ -65,7 +65,7 @@ export default function Layout() {
     { id: 'stocks', label: 'Stocks' },
     { id: 'reports', label: 'Sales Reports' },
     { id: 'finances', label: 'Finances & P&L' },
-    { id: 'creditors', label: 'Creditors' },
+    { id: 'creditors', label: 'Creditors / Profiles' },
   ];
 
   return (
