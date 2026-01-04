@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { ref, onValue, push, set, runTransaction } from "firebase/database";
+import PaymentModal from './PaymentModal';
 
 // Inline ProductModal (same as before but we should keep it)
 function ProductModal({ product, onClose, onConfirm }) {
@@ -84,9 +85,17 @@ function ProductModal({ product, onClose, onConfirm }) {
     }
   };
 
+  const handleKeyDown = (e) => {
+      if (e.key === 'Enter') {
+          handleConfirm();
+      } else if (e.key === 'Escape') {
+          onClose();
+      }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg w-full max-w-md">
+      <div className="bg-white p-6 rounded-lg w-full max-w-md" onKeyDown={handleKeyDown}>
         <h3 className="text-xl font-bold mb-4">{product.name}</h3>
 
         {/* Variant Selection */}
@@ -120,6 +129,12 @@ function ProductModal({ product, onClose, onConfirm }) {
               placeholder="Qty"
               onChange={(e) => setQuantity(e.target.value)}
               className="p-3 border rounded w-2/3 text-lg font-bold outline-brand-green"
+              onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                      e.stopPropagation(); // Stop propagation to avoid double triggering if parent handles it
+                      handleConfirm();
+                  }
+              }}
             />
             {itemUnit === 'Kg' ? (
                 <select
@@ -147,6 +162,12 @@ function ProductModal({ product, onClose, onConfirm }) {
               value={discount}
               onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
               className="p-2 border rounded w-full"
+              onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      handleConfirm();
+                  }
+              }}
             />
             <div className="flex items-center whitespace-nowrap">
                <input
@@ -208,6 +229,9 @@ export default function Register() {
   const [message, setMessage] = useState('');
   const [lastSale, setLastSale] = useState(null);
   const [fetchError, setFetchError] = useState(false);
+
+  // Payment Modal State
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
   useEffect(() => {
     const productsRef = ref(db, 'products');
@@ -274,15 +298,16 @@ export default function Register() {
 
   const total = cart.reduce((sum, item) => sum + (item.finalPrice * item.quantity), 0);
 
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
+  const openPaymentModal = () => {
+      if (cart.length === 0) return;
+      setIsPaymentModalOpen(true);
+  };
+
+  const handlePaymentConfirm = async (paymentData) => {
+    setIsPaymentModalOpen(false);
     setLoading(true);
 
     // We need to update stock for each item transactionally
-    // For simplicity, we'll try to update one by one. If one fails, we should ideally rollback, but for now we'll do best effort.
-    // Better approach: Run a transaction on the products node? Or individual transactions?
-    // Individual transactions on specific variants is safer for concurrency.
-
     try {
        const saleData = {
           items: cart.map(item => ({
@@ -296,7 +321,9 @@ export default function Register() {
             discount: (item.price - item.finalPrice)
           })),
           total: total,
-          date: new Date().toISOString()
+          date: new Date().toISOString(),
+          paymentMethod: paymentData.method,
+          customerDetails: paymentData.customerDetails || null
        };
 
        // Update Stocks
@@ -318,6 +345,19 @@ export default function Register() {
        const newSaleRef = push(salesRef);
        await set(newSaleRef, saleData);
 
+       // If Credit Sale, optionally we could save to a 'debtors' or 'customers' node
+       // The requirement asked to "create a profile". We are saving it in the sale.
+       // We can also push to a `customers` node for easier lookup.
+       if (paymentData.method === 'Credit Sale' && paymentData.customerDetails) {
+           const customersRef = ref(db, 'customers');
+           const newCustomerRef = push(customersRef);
+           await set(newCustomerRef, {
+               ...paymentData.customerDetails,
+               saleId: newSaleRef.key,
+               date: new Date().toISOString()
+           });
+       }
+
         setMessage('Transaction Successful!');
         setLastSale({
           id: newSaleRef.key,
@@ -334,6 +374,24 @@ export default function Register() {
       setMessage('Transaction Failed: ' + error.message);
     }
     setLoading(false);
+  };
+
+  // Handle Global Enter for Checkout (when search is empty)
+  const handleSearchKeyDown = (e) => {
+      if (e.key === 'Enter') {
+          // If search is empty and cart has items, trigger checkout
+          if (search.trim() === '' && cart.length > 0) {
+              e.preventDefault();
+              openPaymentModal();
+          }
+          // If search has text, it usually just filters, but if there is only 1 item, maybe select it?
+          // Current logic: Enter filters. User clicks item to select.
+          // Enhancement: If 1 item, select it.
+          if (filteredProducts.length === 1 && search.trim() !== '') {
+               setSelectedProduct(filteredProducts[0]);
+               setSearch(''); // Clear search on selection? Or keep it? Clearing is better for flow.
+          }
+      }
   };
 
   if (lastSale) {
@@ -374,6 +432,8 @@ export default function Register() {
             className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-brand-green outline-none"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            autoFocus
           />
 
           <div className="flex flex-wrap gap-2">
@@ -457,21 +517,30 @@ export default function Register() {
           {message && <div className={`mb-2 text-center text-sm font-bold ${message.includes('Transaction Failed') ? 'text-red-500' : 'text-green-500'}`}>{message}</div>}
 
           <button
-            onClick={handleCheckout}
+            onClick={openPaymentModal}
             disabled={cart.length === 0 || loading}
             className="w-full bg-brand-green text-white py-3 rounded-lg font-bold shadow hover:bg-green-700 disabled:bg-gray-400 transition-colors"
           >
-            {loading ? 'Processing...' : 'Charge'}
+            {loading ? 'Processing...' : 'Checkout (Enter)'}
           </button>
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Product Modal */}
       {selectedProduct && (
         <ProductModal
           product={selectedProduct}
           onClose={() => setSelectedProduct(null)}
           onConfirm={addToCart}
+        />
+      )}
+
+      {/* Payment Modal */}
+      {isPaymentModalOpen && (
+        <PaymentModal
+            onClose={() => setIsPaymentModalOpen(false)}
+            onConfirm={handlePaymentConfirm}
+            total={total}
         />
       )}
     </div>
