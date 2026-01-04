@@ -307,11 +307,17 @@ export default function Register() {
     setIsPaymentModalOpen(false);
     setLoading(true);
 
-    // Generate a simple Receipt ID (Time based suffix)
-    const receiptId = `R-${Date.now().toString().slice(-8)}`;
-
     // We need to update stock for each item transactionally
     try {
+        // Generate Sequential Receipt ID
+        const counterRef = ref(db, 'metadata/receiptCounter');
+        const counterResult = await runTransaction(counterRef, (current) => {
+            return (current || 0) + 1;
+        });
+
+        const count = counterResult.snapshot.val() || 1; // Fallback to 1 if something weird happens
+        const receiptId = count.toString().padStart(8, '0');
+
        const saleData = {
           receiptId,
           items: cart.map(item => ({
