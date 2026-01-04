@@ -4,7 +4,6 @@ import Inventory from './Inventory';
 import Stocks from './Stocks';
 import Reports from './Reports';
 import Finances from './Finances';
-import Creditors from './Creditors';
 import PinModal from './PinModal';
 
 export default function Layout() {
@@ -16,7 +15,7 @@ export default function Layout() {
   const [pendingView, setPendingView] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false); // Session-based auth for simplicity
 
-  const protectedViews = ['inventory', 'reports', 'finances', 'creditors'];
+  const protectedViews = ['inventory', 'reports', 'finances'];
 
   const handleNavClick = (viewId) => {
     if (protectedViews.includes(viewId) && !isAuthenticated) {
@@ -52,8 +51,6 @@ export default function Layout() {
         return <Reports />;
       case 'finances':
         return <Finances />;
-      case 'creditors':
-        return <Creditors />;
       default:
         return <Register />;
     }
@@ -65,7 +62,6 @@ export default function Layout() {
     { id: 'stocks', label: 'Stocks' },
     { id: 'reports', label: 'Sales Reports' },
     { id: 'finances', label: 'Finances & P&L' },
-    { id: 'creditors', label: 'Creditors' },
   ];
 
   return (
