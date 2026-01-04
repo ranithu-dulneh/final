@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import DatePicker from 'react-datepicker';
+import "react-datepicker/dist/react-datepicker.css";
 import { db } from '../firebase';
 import { ref, onValue, push, set } from "firebase/database";
 
@@ -7,7 +9,11 @@ export default function Finances() {
   const [expenses, setExpenses] = useState([]);
   const [drawings, setDrawings] = useState([]);
   const [sales, setSales] = useState([]);
-  const [pnlData, setPnlData] = useState(null);
+
+  // Filters
+  const [filterType, setFilterType] = useState('today');
+  const [startDate, setStartDate] = useState(new Date());
+  const [endDate, setEndDate] = useState(new Date());
 
   // Forms
   const [expenseForm, setExpenseForm] = useState({ description: '', category: 'Wages', amount: '' });
@@ -47,35 +53,64 @@ export default function Finances() {
     });
   }, []);
 
-  // Calculate P&L on the fly whenever data changes
-  useEffect(() => {
-      if (sales.length >= 0) { // Always run if we have sales loaded (even if empty)
+  // Filter Data using useMemo
+  const { filteredSales, filteredExpenses, filteredDrawings } = useMemo(() => {
+      let start = new Date();
+      let end = new Date();
+
+      if (filterType === 'today') {
+          start.setHours(0, 0, 0, 0);
+          end.setHours(23, 59, 59, 999);
+      } else if (filterType === '7days') {
+          start.setDate(end.getDate() - 7);
+          start.setHours(0, 0, 0, 0);
+          end.setHours(23, 59, 59, 999);
+      } else if (filterType === 'month') {
+          start.setDate(1);
+          start.setHours(0, 0, 0, 0);
+          // End of current month
+          end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59, 999);
+      } else if (filterType === 'custom') {
+          start = new Date(startDate);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+      }
+
+      // Filter Sales
+      const fs = sales.filter(s => {
+          if (!s.date) return false;
+          const d = new Date(s.date);
+          return d >= start && d <= end;
+      });
+
+      // Filter Expenses
+      const fe = expenses.filter(e => {
+          if (!e.expense_date) return false;
+          const d = new Date(e.expense_date);
+          return d >= start && d <= end;
+      });
+
+      // Filter Drawings
+      const fd = drawings.filter(d => {
+          if (!d.drawing_date) return false;
+          const dd = new Date(d.drawing_date);
+          return dd >= start && dd <= end;
+      });
+
+      return { filteredSales: fs, filteredExpenses: fe, filteredDrawings: fd };
+
+  }, [sales, expenses, drawings, filterType, startDate, endDate]);
+
+  // Calculate P&L on filtered data using useMemo
+  const pnlData = useMemo(() => {
         let revenue = 0;
         let cogs = 0;
 
-        // Filter for "Today" - actually the requirement says "Today" filter for reports, but here we just show total for now or simple logic
-        // The original PnL endpoint calculated totals. Let's do total for simplicity or add date filter later if requested.
-        // For now, let's aggregate ALL time data as per previous MVP behavior, or maybe "This Month".
-        // Let's stick to ALL time for simplicity unless specified.
-
-        sales.forEach(sale => {
+        filteredSales.forEach(sale => {
             if (sale.items) {
                 sale.items.forEach(item => {
-                   revenue += (item.price * item.quantity); // This is actually the selling price * qty
-                   // COGS calculation needs cost price.
-                   // Wait, sales record only has selling price (finalPrice) and 'price' (which seems to be selling price before discount).
-                   // We need cost price to calc COGS.
-                   // The previous `sales` implementation in Register.jsx SAVED `price` as `pricePerBaseUnit`.
-                   // It did NOT save cost price.
-                   // We need to fetch products to get cost price? Or update Register to save cost price.
-                   // Updating Register to save cost price is better for historical accuracy.
-
-                   // For now, since we didn't update Register to save cost price, we can't calculate COGS accurately without looking up current product cost.
-                   // Let's assume for this step we will skip detailed COGS or use a heuristic if not available.
-                   // Actually, let's update Register.jsx to save cost_price as well.
-                   // But first let's finish this file assuming we might have it or just 0 for now.
-
-                   // Check if we have cost_price in the sale item (we will add it to Register.jsx in next step correction if needed)
+                   revenue += (item.price * item.quantity);
                    if (item.cost_price) {
                        cogs += (item.cost_price * item.quantity);
                    }
@@ -83,25 +118,20 @@ export default function Finances() {
             }
         });
 
-        // However, looking at my Register.jsx refactor, I did NOT include cost_price in the sale record.
-        // I should fix Register.jsx to include cost_price.
-        // For now, I will proceed with this file, and then go back to Register.jsx.
-
-        const totalExpenses = expenses.reduce((sum, e) => sum + parseFloat(e.amount), 0);
-        const totalDrawings = drawings.reduce((sum, d) => sum + parseFloat(d.amount), 0);
-        const grossProfit = revenue - cogs; // COGS will be 0 until I fix Register.jsx
+        const totalExpenses = filteredExpenses.reduce((sum, e) => sum + parseFloat(e.amount), 0);
+        const totalDrawings = filteredDrawings.reduce((sum, d) => sum + parseFloat(d.amount), 0);
+        const grossProfit = revenue - cogs;
         const netProfit = grossProfit - totalExpenses;
 
-        setPnlData({
+        return {
             revenue,
             cogs,
             grossProfit,
             totalExpenses,
             netProfit,
             totalDrawings
-        });
-      }
-  }, [sales, expenses, drawings]);
+        };
+  }, [filteredSales, filteredExpenses, filteredDrawings]);
 
 
   const handleAddExpense = async (e) => {
@@ -140,6 +170,39 @@ export default function Finances() {
 
   return (
     <div className="space-y-6">
+      {/* Date Filters */}
+      <div className="bg-white p-4 rounded-lg shadow-sm flex flex-wrap gap-4 items-center">
+        <label className="font-semibold text-gray-700">Date Range:</label>
+        <select
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value)}
+          className="p-2 border rounded"
+        >
+          <option value="today">Today</option>
+          <option value="7days">Last 7 Days</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
+
+        {filterType === 'custom' && (
+          <div className="flex gap-2 items-center">
+            <DatePicker
+                selected={startDate}
+                onChange={(date) => setStartDate(date)}
+                className="p-2 border rounded"
+                placeholderText="Start Date"
+            />
+            <span className="text-gray-500">-</span>
+            <DatePicker
+                selected={endDate}
+                onChange={(date) => setEndDate(date)}
+                className="p-2 border rounded"
+                placeholderText="End Date"
+            />
+          </div>
+        )}
+      </div>
+
       <div className="bg-white p-4 rounded-lg shadow-sm flex space-x-4">
         <button onClick={() => setActiveTab('pnl')} className={`px-4 py-2 rounded ${activeTab === 'pnl' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>P&L Statement</button>
         <button onClick={() => setActiveTab('expenses')} className={`px-4 py-2 rounded ${activeTab === 'expenses' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>Expenses</button>
@@ -150,7 +213,14 @@ export default function Finances() {
 
       {activeTab === 'pnl' && pnlData && (
         <div className="bg-white p-6 rounded-lg shadow-md max-w-2xl mx-auto">
-          <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">Profit & Loss Statement (All Time)</h2>
+          <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
+            Profit & Loss Statement
+            <span className="text-sm font-normal text-gray-500 ml-2">
+                ({filterType === 'today' ? 'Today' :
+                  filterType === '7days' ? 'Last 7 Days' :
+                  filterType === 'month' ? 'This Month' : 'Custom Range'})
+            </span>
+          </h2>
 
           <div className="space-y-4">
              <div className="flex justify-between text-lg">
@@ -233,7 +303,7 @@ export default function Finances() {
            </div>
 
            <div className="bg-white p-6 rounded-lg shadow overflow-auto">
-              <h3 className="text-lg font-bold mb-4">Recent Expenses</h3>
+              <h3 className="text-lg font-bold mb-4">Expenses ({filterType === 'today' ? 'Today' : filterType === '7days' ? 'Last 7 Days' : filterType === 'month' ? 'This Month' : 'Custom Range'})</h3>
               <table className="min-w-full">
                  <thead>
                     <tr className="text-left text-xs font-medium text-gray-500 uppercase">
@@ -244,7 +314,7 @@ export default function Finances() {
                     </tr>
                  </thead>
                  <tbody>
-                    {expenses.map(e => (
+                    {filteredExpenses.map(e => (
                        <tr key={e.id} className="border-t">
                           <td className="py-2 text-sm">{new Date(e.expense_date).toLocaleDateString()}</td>
                           <td className="py-2 text-sm font-medium">{e.category}</td>
@@ -254,6 +324,7 @@ export default function Finances() {
                     ))}
                  </tbody>
               </table>
+              {filteredExpenses.length === 0 && <p className="text-gray-500 text-center py-4">No expenses found for this period.</p>}
            </div>
         </div>
       )}
@@ -286,7 +357,7 @@ export default function Finances() {
            </div>
 
            <div className="bg-white p-6 rounded-lg shadow overflow-auto">
-              <h3 className="text-lg font-bold mb-4">Recent Drawings</h3>
+              <h3 className="text-lg font-bold mb-4">Drawings ({filterType === 'today' ? 'Today' : filterType === '7days' ? 'Last 7 Days' : filterType === 'month' ? 'This Month' : 'Custom Range'})</h3>
               <table className="min-w-full">
                  <thead>
                     <tr className="text-left text-xs font-medium text-gray-500 uppercase">
@@ -296,7 +367,7 @@ export default function Finances() {
                     </tr>
                  </thead>
                  <tbody>
-                    {drawings.map(d => (
+                    {filteredDrawings.map(d => (
                        <tr key={d.id} className="border-t">
                           <td className="py-2 text-sm">{new Date(d.drawing_date).toLocaleDateString()}</td>
                           <td className="py-2 text-sm text-gray-500">{d.description}</td>
@@ -305,6 +376,7 @@ export default function Finances() {
                     ))}
                  </tbody>
               </table>
+              {filteredDrawings.length === 0 && <p className="text-gray-500 text-center py-4">No drawings found for this period.</p>}
            </div>
          </div>
       )}
