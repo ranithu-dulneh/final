@@ -10,6 +10,7 @@ export default function Creditors() {
   const [settlementCreditor, setSettlementCreditor] = useState(null); // For Settlement Modal
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const customersRef = ref(db, 'customers');
@@ -50,6 +51,7 @@ export default function Creditors() {
         date: sale.date || sale.timestamp, // prefer date string
         amount: debtAmount,
         description: sale.description,
+        receiptId: sale.receiptId || null,
         id: key
       });
     });
@@ -82,7 +84,17 @@ export default function Creditors() {
     })).sort((a, b) => b.balance - a.balance); // Highest debt first
   }, [customersData, settlementsData]);
 
-  const filteredCreditors = creditors.filter(c => showSettled ? true : c.balance > 0.01); // Float tolerance
+  const filteredCreditors = creditors.filter(c => {
+      const matchesShow = showSettled ? true : c.balance > 0.01;
+
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = searchTerm === '' ||
+                            c.name.toLowerCase().includes(searchLower) ||
+                            c.phone.toLowerCase().includes(searchLower) ||
+                            c.transactions.some(t => t.receiptId && t.receiptId.toLowerCase().includes(searchLower));
+
+      return matchesShow && matchesSearch;
+  }); // Float tolerance
 
   const handleAddSettlement = () => {
     if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return alert("Invalid amount");
@@ -107,16 +119,26 @@ export default function Creditors() {
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
         <h2 className="text-2xl font-bold text-gray-800">Creditors Management</h2>
-        <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600">Show Settled</span>
-            <button
-                onClick={() => setShowSettled(!showSettled)}
-                className={`w-12 h-6 rounded-full p-1 transition-colors ${showSettled ? 'bg-brand-green' : 'bg-gray-300'}`}
-            >
-                <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${showSettled ? 'translate-x-6' : ''}`}></div>
-            </button>
+        <div className="flex items-center gap-4 w-full md:w-auto">
+             <input
+                type="text"
+                placeholder="Search Name, Phone, Receipt ID..."
+                className="p-2 border rounded flex-1 md:w-64 focus:ring-2 focus:ring-brand-green outline-none"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+            />
+
+            <div className="flex items-center space-x-2 whitespace-nowrap">
+                <span className="text-sm text-gray-600">Show Settled</span>
+                <button
+                    onClick={() => setShowSettled(!showSettled)}
+                    className={`w-12 h-6 rounded-full p-1 transition-colors ${showSettled ? 'bg-brand-green' : 'bg-gray-300'}`}
+                >
+                    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${showSettled ? 'translate-x-6' : ''}`}></div>
+                </button>
+            </div>
         </div>
       </div>
 
@@ -259,7 +281,10 @@ export default function Creditors() {
                                                     {t.type}
                                                 </span>
                                             </td>
-                                            <td className="p-3 text-gray-700">{t.description || t.note || '-'}</td>
+                                            <td className="p-3 text-gray-700">
+                                                {t.receiptId && <span className="text-xs bg-gray-200 px-1 rounded mr-2">{t.receiptId}</span>}
+                                                {t.description || t.note || '-'}
+                                            </td>
                                             <td className={`p-3 text-right font-medium ${t.type === 'DEBT' ? 'text-red-600' : 'text-green-600'}`}>
                                                 {t.type === 'PAYMENT' ? '-' : '+'} Rs. {t.amount.toFixed(2)}
                                             </td>

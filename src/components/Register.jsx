@@ -307,9 +307,13 @@ export default function Register() {
     setIsPaymentModalOpen(false);
     setLoading(true);
 
+    // Generate a simple Receipt ID (Time based suffix)
+    const receiptId = `R-${Date.now().toString().slice(-8)}`;
+
     // We need to update stock for each item transactionally
     try {
        const saleData = {
+          receiptId,
           items: cart.map(item => ({
             productId: item.productId,
             variantId: item.variantId,
@@ -321,6 +325,7 @@ export default function Register() {
             discount: (item.price - item.finalPrice)
           })),
           total: total,
+          status: 'completed',
           date: new Date().toISOString(),
           paymentMethod: paymentData.method,
           customerDetails: paymentData.customerDetails || null
@@ -354,11 +359,12 @@ export default function Register() {
            await set(newCustomerRef, {
                ...paymentData.customerDetails,
                saleId: newSaleRef.key,
+               receiptId: receiptId,
                date: new Date().toISOString()
            });
        }
 
-        setMessage('Transaction Successful!');
+        setMessage(`Transaction Successful! (ID: ${receiptId})`);
         setLastSale({
           id: newSaleRef.key,
           items: [...cart],
