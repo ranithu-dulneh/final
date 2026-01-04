@@ -1,14 +1,28 @@
 import React, { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { ref, onValue } from "firebase/database";
 
 export default function Stocks() {
   const [products, setProducts] = useState([]);
 
   useEffect(() => {
-    fetch('/api/products')
-      .then(res => res.json())
-      .then(data => {
-        if (data.data) setProducts(data.data);
-      });
+    const productsRef = ref(db, 'products');
+    const unsubscribe = onValue(productsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            // Convert object to array
+            const productsList = Object.entries(data).map(([id, product]) => ({
+                id,
+                ...product,
+                variants: product.variants || []
+            }));
+            setProducts(productsList);
+        } else {
+            setProducts([]);
+        }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   return (
@@ -26,16 +40,16 @@ export default function Stocks() {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {products.flatMap(product =>
-              product.variants.map(variant => (
-                <tr key={variant.id}>
+              product.variants.map((variant, index) => (
+                <tr key={`${product.id}-${index}`}>
                   <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{product.name}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-gray-600">{variant.name}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-gray-400 font-mono text-sm">{variant.sku}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      variant.stock_quantity < 5 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+                      variant.stock < 5 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
                     }`}>
-                      {variant.stock_quantity} Remaining
+                      {variant.stock} Remaining
                     </span>
                   </td>
                 </tr>

@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { ref, onValue, push, set, remove, update } from "firebase/database";
 
 export default function Inventory() {
   const [products, setProducts] = useState([]);
@@ -14,41 +16,52 @@ export default function Inventory() {
   const [message, setMessage] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editProductId, setEditProductId] = useState(null);
-  const [fetchError, setFetchError] = useState(false);
-
-  const fetchProducts = async () => {
-    setFetchError(false);
-    try {
-      const res = await fetch('/api/products');
-      if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      if (data.data) setProducts(data.data);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      setFetchError(true);
-    }
-  };
-
-  const fetchCategories = async () => {
-    try {
-      const res = await fetch('/api/categories');
-      const data = await res.json();
-      if (data.data) {
-        setCategories(data.data);
-        // Set default category if not set
-        if (!formData.category && data.data.length > 0) {
-            setFormData(prev => ({ ...prev, category: data.data[0].name }));
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-    }
-  };
 
   useEffect(() => {
-    fetchProducts();
-    fetchCategories();
+    const productsRef = ref(db, 'products');
+    const unsubscribeProducts = onValue(productsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        // Convert object to array and preserve keys as IDs
+        const productsList = Object.entries(data).map(([id, product]) => ({
+          id,
+          ...product,
+          variants: product.variants || [] // Ensure variants is an array
+        }));
+        setProducts(productsList);
+      } else {
+        setProducts([]);
+      }
+    });
+
+    const categoriesRef = ref(db, 'categories');
+    const unsubscribeCategories = onValue(categoriesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const categoriesList = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+        setCategories(categoriesList);
+      } else {
+        // Seed initial categories if empty
+        const initialCategories = ['Fertilizer', 'Insecticide', 'Herbicide', 'Fungicide', 'Seeds', 'Equipment'];
+        initialCategories.forEach(name => {
+           push(categoriesRef, { name });
+        });
+      }
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeCategories();
+    };
   }, []);
+
+  // Effect to set default category when categories load
+  useEffect(() => {
+      if (!formData.category && categories.length > 0 && !isEditing) {
+          setFormData(prev => ({ ...prev, category: categories[0].name }));
+      }
+  }, [categories, formData.category, isEditing]);
+
 
   const handleProductChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -58,19 +71,13 @@ export default function Inventory() {
     const newCat = prompt("Enter new category name:");
     if (!newCat) return;
     try {
-      const res = await fetch('/api/categories', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ name: newCat })
-      });
-      if (res.ok) {
-        fetchCategories();
-        setFormData({ ...formData, category: newCat });
-      } else {
-        alert("Failed to add category");
-      }
+      const categoriesRef = ref(db, 'categories');
+      const newCatRef = push(categoriesRef);
+      await set(newCatRef, { name: newCat });
+      setFormData({ ...formData, category: newCat });
     } catch (e) {
       console.error(e);
+      alert("Failed to add category");
     }
   };
 
@@ -83,25 +90,15 @@ export default function Inventory() {
       alert("Name, SKU, and Selling Price are required for a variant.");
       return;
     }
-    setVariants([...variants, { ...variantForm }]);
+    setVariants([...variants, { ...variantForm, id: Date.now().toString() + Math.random().toString().slice(2) }]); // Generate a temp ID
     setVariantForm({ name: '', sku: '', cost_price: '', selling_price: '', stock: '', max_discount: '', measure_unit: 'Unit' });
   };
 
-  const removeVariant = async (index, variant) => {
-    if (variant.id) {
-       // It's an existing variant in edit mode
-       if (!window.confirm("Are you sure you want to delete this variant?")) return;
-       try {
-         await fetch(`/api/variants/${variant.id}`, { method: 'DELETE' });
-         // Remove from local state
-         setVariants(variants.filter((_, i) => i !== index));
-       } catch (err) {
-         alert("Error deleting variant");
+  const removeVariant = (index, variant) => {
+       if (isEditing) {
+           if (!window.confirm("Are you sure you want to delete this variant?")) return;
        }
-    } else {
-       // Just remove from state
        setVariants(variants.filter((_, i) => i !== index));
-    }
   };
 
   const handleSubmit = async (e) => {
@@ -113,7 +110,6 @@ export default function Inventory() {
     setLoading(true);
     setMessage('');
 
-    // Ensure category is set (if user didn't change dropdown from default)
     const payload = {
         ...formData,
         category: formData.category || (categories[0]?.name || 'Uncategorized'),
@@ -121,29 +117,17 @@ export default function Inventory() {
     };
 
     try {
-      let res;
       if (isEditing) {
-        res = await fetch(`/api/products/${editProductId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const productRef = ref(db, `products/${editProductId}`);
+        await update(productRef, payload);
+        setMessage('Product updated successfully!');
       } else {
-        res = await fetch('/api/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const productsRef = ref(db, 'products');
+        const newProductRef = push(productsRef);
+        await set(newProductRef, payload);
+        setMessage('Product added successfully!');
       }
-
-      if (res.ok) {
-        setMessage(isEditing ? 'Product updated successfully!' : 'Product added successfully!');
-        resetForm();
-        fetchProducts();
-      } else {
-        const errData = await res.json().catch(() => ({ error: res.statusText }));
-        setMessage('Error: ' + (errData.error || res.status));
-      }
+      resetForm();
     } catch (error) {
       setMessage('Error connecting to server: ' + error.message);
     }
@@ -162,46 +146,35 @@ export default function Inventory() {
     setIsEditing(true);
     setEditProductId(product.id);
     setFormData({ name: product.name, category: product.category });
-    // Map variants to ensure numbers are handled for form inputs if needed, though state handles strings too
-    setVariants(product.variants.map(v => ({
-      id: v.id,
-      name: v.name,
-      sku: v.sku,
-      cost_price: v.cost_price,
-      selling_price: v.selling_price,
-      stock: v.stock,
-      max_discount: v.max_discount,
-      measure_unit: v.measure_unit
-    })));
-    // Scroll to top
+    setVariants(product.variants || []);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this product and all its variants?')) return;
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
-      fetchProducts();
+      await remove(ref(db, `products/${id}`));
     } catch (error) {
       console.error('Error deleting product', error);
     }
   };
 
-  const handleRestock = async (variantId, currentStock) => {
+  const handleRestock = async (product, variantIndex) => {
     const quantity = prompt('Enter quantity to add:', '0');
     if (!quantity || isNaN(quantity)) return;
     const qtyInt = parseInt(quantity);
     if (qtyInt === 0) return;
 
     try {
-      await fetch(`/api/variants/${variantId}/stock`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity: qtyInt })
-      });
-      fetchProducts();
+      const currentStock = parseInt(product.variants[variantIndex].stock || 0);
+      const newStock = currentStock + qtyInt;
+
+      const variantStockRef = ref(db, `products/${product.id}/variants/${variantIndex}/stock`);
+      await set(variantStockRef, newStock); // Use set to update the specific value
+
     } catch (error) {
       console.error('Error restocking', error);
+      alert('Error updating stock');
     }
   };
 
@@ -295,10 +268,7 @@ export default function Inventory() {
       <div className="bg-white p-6 rounded-lg shadow-md">
         <div className="flex justify-between items-center mb-4">
            <h2 className="text-xl font-semibold">Inventory List</h2>
-           <button onClick={fetchProducts} className="text-sm text-blue-600 hover:underline">Refresh</button>
         </div>
-
-        {fetchError && <p className="text-red-500 mb-2">Error loading inventory. Check connection.</p>}
 
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -317,15 +287,15 @@ export default function Inventory() {
                   <td className="px-6 py-4 whitespace-nowrap text-gray-500">{product.category}</td>
                   <td className="px-6 py-4">
                     <div className="space-y-1">
-                      {product.variants.map(v => (
-                        <div key={v.id} className="text-sm flex justify-between items-center bg-gray-50 p-1 rounded">
+                      {product.variants && product.variants.map((v, index) => (
+                        <div key={index} className="text-sm flex justify-between items-center bg-gray-50 p-1 rounded">
                           <span>
                             <span className="font-semibold">{v.name}</span>
                             <span className="text-gray-500 ml-2">({v.sku})</span>
                           </span>
                           <span className="mx-2">Rs. {v.selling_price}</span>
                           <span className={`${v.stock < 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>Qty: {v.stock}</span>
-                          <button onClick={() => handleRestock(v.id, v.stock)} className="text-xs text-blue-600 hover:underline ml-2">Restock</button>
+                          <button onClick={() => handleRestock(product, index)} className="text-xs text-blue-600 hover:underline ml-2">Restock</button>
                         </div>
                       ))}
                     </div>

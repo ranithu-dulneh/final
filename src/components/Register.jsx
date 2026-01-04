@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import PinModal from './PinModal'; // Ensure this is available if used, or use inline logic
+import { db } from '../firebase';
+import { ref, onValue, push, set, runTransaction } from "firebase/database";
 
 // Inline ProductModal (same as before but we should keep it)
 function ProductModal({ product, onClose, onConfirm }) {
@@ -10,7 +11,10 @@ function ProductModal({ product, onClose, onConfirm }) {
   const [isSpecialDiscount, setIsSpecialDiscount] = useState(false);
   const [showPin, setShowPin] = useState(false);
 
-  const selectedVariant = product.variants.find(v => v.id == selectedVariantId);
+  // Find index of variant to access stock later
+  const selectedVariantIndex = product.variants.findIndex(v => v.id == selectedVariantId);
+  const selectedVariant = product.variants[selectedVariantIndex];
+
   const maxDiscount = selectedVariant?.max_discount || 0;
   const itemUnit = selectedVariant?.measure_unit || 'Unit';
 
@@ -31,6 +35,7 @@ function ProductModal({ product, onClose, onConfirm }) {
   // Calculate price
   // Price is per ITEM UNIT.
   const pricePerBaseUnit = selectedVariant ? selectedVariant.selling_price : 0;
+  const costPricePerBaseUnit = selectedVariant ? selectedVariant.cost_price : 0;
   const unitPrice = pricePerBaseUnit; // For calc purposes
 
   const discountedUnitPrice = unitPrice - (isSpecialDiscount ? (unitPrice * discount / 100) : (unitPrice * Math.min(discount, maxDiscount) / 100));
@@ -55,10 +60,13 @@ function ProductModal({ product, onClose, onConfirm }) {
     }
 
     onConfirm({
+      productId: product.id,
       productName: product.name,
+      variantIndex: selectedVariantIndex, // Pass index for easier DB update
       variantId: selectedVariant.id,
       variantName: selectedVariant.name,
       price: pricePerBaseUnit, // Base price per stock unit
+      cost_price: costPricePerBaseUnit, // Base cost per stock unit for COGS
       quantity: normalizedQty, // Stock decrement amount
       displayQuantity: qtyVal,
       displayUnit: saleUnit,
@@ -201,27 +209,40 @@ export default function Register() {
   const [lastSale, setLastSale] = useState(null);
   const [fetchError, setFetchError] = useState(false);
 
-  const fetchData = async () => {
-    setFetchError(false);
-    try {
-      const prodRes = await fetch('/api/products');
-      if (!prodRes.ok) throw new Error("Failed to fetch products");
-      const prodData = await prodRes.json();
-      if (prodData.data) setProducts(prodData.data);
-
-      const catRes = await fetch('/api/categories');
-      if (catRes.ok) {
-         const catData = await catRes.json();
-         if (catData.data) setCategories(catData.data);
-      }
-    } catch (e) {
-      console.error(e);
-      setFetchError(true);
-    }
-  };
-
   useEffect(() => {
-    fetchData();
+    const productsRef = ref(db, 'products');
+    const unsubscribeProducts = onValue(productsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const productsList = Object.entries(data).map(([id, product]) => ({
+          id,
+          ...product,
+          variants: product.variants || []
+        }));
+        setProducts(productsList);
+      } else {
+        setProducts([]);
+      }
+    }, (error) => {
+      console.error(error);
+      setFetchError(true);
+    });
+
+    const categoriesRef = ref(db, 'categories');
+    const unsubscribeCategories = onValue(categoriesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const categoriesList = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+        setCategories(categoriesList);
+      } else {
+        setCategories([]);
+      }
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeCategories();
+    };
   }, []);
 
   const filteredProducts = products.filter(p => {
@@ -238,7 +259,7 @@ export default function Register() {
     if (existing) {
        const newCart = cart.map(c =>
          (c.variantId === itemData.variantId && c.discount === itemData.discount)
-         ? { ...c, quantity: c.quantity + itemData.quantity }
+         ? { ...c, quantity: c.quantity + itemData.quantity, displayQuantity: c.displayQuantity + itemData.displayQuantity }
          : c
        );
        setCart(newCart);
@@ -257,43 +278,60 @@ export default function Register() {
     if (cart.length === 0) return;
     setLoading(true);
 
-    const saleData = {
-      items: cart.map(item => ({
-        variantId: item.variantId,
-        quantity: item.quantity,
-        price: item.finalPrice,
-        discount: (item.price - item.finalPrice)
-      }))
-    };
+    // We need to update stock for each item transactionally
+    // For simplicity, we'll try to update one by one. If one fails, we should ideally rollback, but for now we'll do best effort.
+    // Better approach: Run a transaction on the products node? Or individual transactions?
+    // Individual transactions on specific variants is safer for concurrency.
 
     try {
-      const res = await fetch('/api/sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(saleData)
-      });
+       const saleData = {
+          items: cart.map(item => ({
+            productId: item.productId,
+            variantId: item.variantId,
+            productName: item.productName,
+            variantName: item.variantName,
+            quantity: item.quantity,
+            cost_price: item.cost_price, // Save cost price for P&L
+            price: item.finalPrice,
+            discount: (item.price - item.finalPrice)
+          })),
+          total: total,
+          date: new Date().toISOString()
+       };
 
-      if (res.ok) {
-        const data = await res.json();
+       // Update Stocks
+       const stockUpdates = [];
+       for (const item of cart) {
+          const productRef = ref(db, `products/${item.productId}/variants/${item.variantIndex}/stock`);
+          const p = runTransaction(productRef, (currentStock) => {
+             if (currentStock === null) return 0; // Or abort
+             if (currentStock < item.quantity) throw new Error(`Insufficient stock for ${item.productName}`);
+             return currentStock - item.quantity;
+          });
+          stockUpdates.push(p);
+       }
+
+       await Promise.all(stockUpdates);
+
+       // Save Sale Record
+       const salesRef = ref(db, 'sales');
+       const newSaleRef = push(salesRef);
+       await set(newSaleRef, saleData);
+
         setMessage('Transaction Successful!');
         setLastSale({
-          id: data.saleId,
+          id: newSaleRef.key,
           items: [...cart],
           total: total,
           date: new Date().toLocaleString()
         });
         setCart([]);
-        fetch('/api/products') // Refresh stock
-          .then(res => res.json())
-          .then(data => setProducts(data.data || []));
 
         setTimeout(() => setMessage(''), 3000);
-      } else {
-        const err = await res.json();
-        setMessage('Error: ' + err.error);
-      }
+
     } catch (error) {
-      setMessage('Network Error');
+      console.error(error);
+      setMessage('Transaction Failed: ' + error.message);
     }
     setLoading(false);
   };
@@ -360,7 +398,6 @@ export default function Register() {
         {fetchError && (
           <div className="p-4 text-center">
             <p className="text-red-500 mb-2">Error loading data.</p>
-            <button onClick={fetchData} className="bg-blue-600 text-white px-4 py-2 rounded">Retry</button>
           </div>
         )}
 
@@ -417,7 +454,7 @@ export default function Register() {
               <span>Rs. {total.toFixed(2)}</span>
           </div>
 
-          {message && <div className={`mb-2 text-center text-sm font-bold ${message.includes('Error') ? 'text-red-500' : 'text-green-500'}`}>{message}</div>}
+          {message && <div className={`mb-2 text-center text-sm font-bold ${message.includes('Transaction Failed') ? 'text-red-500' : 'text-green-500'}`}>{message}</div>}
 
           <button
             onClick={handleCheckout}

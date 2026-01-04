@@ -1,37 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
+import { db } from '../firebase';
+import { ref, onValue } from "firebase/database";
 
 export default function Reports() {
   const [sales, setSales] = useState([]);
+  const [filteredSales, setFilteredSales] = useState([]);
   const [startDate, setStartDate] = useState(new Date());
   const [endDate, setEndDate] = useState(new Date());
   const [filterType, setFilterType] = useState('today');
 
-  const fetchReports = async () => {
-    let query = '';
-    if (filterType === 'custom') {
-      query = `?startDate=${startDate.toISOString().split('T')[0]}&endDate=${endDate.toISOString().split('T')[0]} 23:59:59`;
-    } else if (filterType === 'today') {
-      const today = new Date().toISOString().split('T')[0];
-      query = `?startDate=${today}&endDate=${today} 23:59:59`;
-    } else if (filterType === 'last7') {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 7);
-      query = `?startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]} 23:59:59`;
-    }
-
-    const res = await fetch(`/api/reports${query}`);
-    const data = await res.json();
-    if (data.data) setSales(data.data);
-  };
+  useEffect(() => {
+    const salesRef = ref(db, 'sales');
+    const unsubscribe = onValue(salesRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const salesList = Object.entries(data).map(([id, val]) => ({
+                id,
+                ...val,
+                total_amount: val.total || 0, // Normalize structure
+                sale_date: val.date
+            }));
+            setSales(salesList);
+        } else {
+            setSales([]);
+        }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
-    fetchReports();
-  }, [filterType, startDate, endDate]);
+    if (!sales.length) {
+        setFilteredSales([]);
+        return;
+    }
 
-  const totalRevenue = sales.reduce((sum, sale) => sum + sale.total_amount, 0);
+    let start = new Date();
+    let end = new Date();
+
+    if (filterType === 'today') {
+        start.setHours(0,0,0,0);
+        end.setHours(23,59,59,999);
+    } else if (filterType === 'last7') {
+        start.setDate(end.getDate() - 7);
+        start.setHours(0,0,0,0);
+        end.setHours(23,59,59,999);
+    } else if (filterType === 'custom') {
+        start = new Date(startDate);
+        start.setHours(0,0,0,0);
+        end = new Date(endDate);
+        end.setHours(23,59,59,999);
+    }
+
+    const filtered = sales.filter(sale => {
+        const saleDate = new Date(sale.sale_date);
+        return saleDate >= start && saleDate <= end;
+    });
+
+    // Sort by date desc
+    filtered.sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
+
+    setFilteredSales(filtered);
+  }, [sales, filterType, startDate, endDate]);
+
+  const totalRevenue = filteredSales.reduce((sum, sale) => sum + sale.total_amount, 0);
 
   return (
     <div className="space-y-6">
@@ -63,9 +96,8 @@ export default function Reports() {
         </div>
         <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-blue-500">
           <h3 className="text-gray-500 text-sm uppercase">Transactions</h3>
-          <p className="text-2xl font-bold text-gray-800">{sales.length}</p>
+          <p className="text-2xl font-bold text-gray-800">{filteredSales.length}</p>
         </div>
-        {/* Profit would go here if calculated on frontend or fetched from API */}
       </div>
 
       {/* Sales List */}
@@ -79,16 +111,16 @@ export default function Reports() {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale) => (
+            {filteredSales.map((sale) => (
               <tr key={sale.id}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {new Date(sale.sale_date).toLocaleString()}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-900">
                   <div className="space-y-1">
-                    {sale.items.map((item, idx) => (
+                    {sale.items && sale.items.map((item, idx) => (
                       <div key={idx}>
-                        {item.product} ({item.variant}) x{item.quantity}
+                        {item.productName} ({item.variantName}) x{item.quantity}
                         {item.discount > 0 && <span className="text-green-600 text-xs ml-1">(Disc: Rs. {item.discount})</span>}
                       </div>
                     ))}
