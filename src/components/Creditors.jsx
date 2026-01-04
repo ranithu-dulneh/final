@@ -7,6 +7,8 @@ export default function Creditors() {
   const [settlements, setSettlements] = useState([]);
   const [search, setSearch] = useState('');
   const [selectedCreditor, setSelectedCreditor] = useState(null); // For settlement modal
+  const [viewingProfile, setViewingProfile] = useState(null); // For profile modal
+  const [showSettled, setShowSettled] = useState(false);
 
   // Fetch Data
   useEffect(() => {
@@ -95,10 +97,10 @@ export default function Creditors() {
         ...g,
         balance: g.totalDebt - g.totalSettled
       }))
-      .filter(g => g.balance > 0) // Only show those who owe money
+      .filter(g => showSettled ? true : g.balance > 0.01) // Show all if toggle on, else only active debts. Tolerance for float errors
       .sort((a, b) => b.balance - a.balance); // Highest debt first
 
-  }, [transactions, settlements]);
+  }, [transactions, settlements, showSettled]);
 
   // Filtering
   const filteredCreditors = creditorsList.filter(c =>
@@ -113,18 +115,30 @@ export default function Creditors() {
             <h2 className="text-2xl font-bold text-gray-800">Creditors Management</h2>
             <p className="text-sm text-gray-500">Manage outstanding debts and settlements</p>
          </div>
-         <input
-           type="text"
-           placeholder="Search Name or Phone..."
-           className="p-3 border rounded-lg shadow-sm w-full sm:w-64 focus:ring-2 focus:ring-brand-green outline-none"
-           value={search}
-           onChange={e => setSearch(e.target.value)}
-         />
+         <div className="flex items-center gap-4 w-full sm:w-auto">
+             <div className="flex items-center gap-2">
+                 <input
+                    type="checkbox"
+                    id="showSettled"
+                    checked={showSettled}
+                    onChange={(e) => setShowSettled(e.target.checked)}
+                    className="w-4 h-4 text-brand-green rounded focus:ring-brand-green"
+                 />
+                 <label htmlFor="showSettled" className="text-sm text-gray-700 cursor-pointer select-none">Show Settled</label>
+             </div>
+             <input
+               type="text"
+               placeholder="Search Name or Phone..."
+               className="p-3 border rounded-lg shadow-sm w-full sm:w-64 focus:ring-2 focus:ring-brand-green outline-none"
+               value={search}
+               onChange={e => setSearch(e.target.value)}
+             />
+         </div>
       </div>
 
       <div className="flex-1 overflow-auto bg-white rounded-lg shadow border">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50 sticky top-0">
+          <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
@@ -138,7 +152,7 @@ export default function Creditors() {
             {filteredCreditors.length === 0 ? (
                 <tr>
                     <td colSpan="6" className="px-6 py-10 text-center text-gray-400">
-                        No outstanding creditors found.
+                        {showSettled ? "No creditor records found." : "No outstanding creditors found."}
                     </td>
                 </tr>
             ) : (
@@ -158,17 +172,25 @@ export default function Creditors() {
                             Rs. {creditor.totalSettled.toFixed(2)}
                         </td>
                          <td className="px-6 py-4 whitespace-nowrap text-right">
-                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800 text-sm">
+                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${creditor.balance < 1 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} text-sm`}>
                                 Rs. {creditor.balance.toFixed(2)}
                             </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <td className="px-6 py-4 whitespace-nowrap text-center space-x-2">
                             <button
-                                onClick={() => setSelectedCreditor(creditor)}
-                                className="bg-brand-green text-white px-4 py-2 rounded text-sm font-medium hover:bg-green-700 transition-colors"
+                                onClick={() => setViewingProfile(creditor)}
+                                className="text-brand-green hover:underline text-sm font-medium"
                             >
-                                Settle
+                                Profile
                             </button>
+                            {creditor.balance > 0.01 && (
+                                <button
+                                    onClick={() => setSelectedCreditor(creditor)}
+                                    className="bg-brand-green text-white px-3 py-1 rounded text-sm font-medium hover:bg-green-700 transition-colors"
+                                >
+                                    Settle
+                                </button>
+                            )}
                         </td>
                     </tr>
                 ))
@@ -182,6 +204,14 @@ export default function Creditors() {
         <SettlementModal
             creditor={selectedCreditor}
             onClose={() => setSelectedCreditor(null)}
+        />
+      )}
+
+      {/* Profile Modal */}
+      {viewingProfile && (
+        <ProfileModal
+            creditor={viewingProfile}
+            onClose={() => setViewingProfile(null)}
         />
       )}
     </div>
@@ -271,6 +301,72 @@ function SettlementModal({ creditor, onClose }) {
                     >
                         {loading ? 'Saving...' : 'Confirm'}
                     </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ProfileModal({ creditor, onClose }) {
+    const sortedHistory = [...creditor.history].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg w-full max-w-2xl shadow-xl h-[80vh] flex flex-col">
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-800">{creditor.name}</h3>
+                        <p className="text-sm text-gray-500">{creditor.phone}</p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 mb-6 bg-gray-50 p-4 rounded-lg">
+                    <div className="text-center border-r border-gray-200">
+                        <div className="text-xs text-gray-500 uppercase">Total Debt</div>
+                        <div className="font-bold text-gray-800">Rs. {creditor.totalDebt.toFixed(2)}</div>
+                    </div>
+                    <div className="text-center border-r border-gray-200">
+                        <div className="text-xs text-gray-500 uppercase">Total Settled</div>
+                        <div className="font-bold text-green-600">Rs. {creditor.totalSettled.toFixed(2)}</div>
+                    </div>
+                    <div className="text-center">
+                        <div className="text-xs text-gray-500 uppercase">Balance</div>
+                        <div className={`font-bold ${creditor.balance < 1 ? 'text-green-600' : 'text-red-600'}`}>Rs. {creditor.balance.toFixed(2)}</div>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-auto border rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {sortedHistory.map((item, idx) => (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2 text-sm text-gray-600 whitespace-nowrap">
+                                        {new Date(item.date).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                        <span className={`px-2 py-0.5 rounded text-xs ${item.type === 'Credit' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                            {item.type}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-2 text-sm text-gray-600">
+                                        {item.description || '-'}
+                                    </td>
+                                    <td className={`px-4 py-2 text-sm font-medium text-right ${item.type === 'Credit' ? 'text-gray-900' : 'text-green-600'}`}>
+                                        Rs. {item.amount.toFixed(2)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
