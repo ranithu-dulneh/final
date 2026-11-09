@@ -16,6 +16,7 @@ export default function Inventory() {
   const [message, setMessage] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editProductId, setEditProductId] = useState(null);
+  const [inventorySearch, setInventorySearch] = useState('');
 
   useEffect(() => {
     const productsRef = ref(db, 'products');
@@ -265,47 +266,130 @@ export default function Inventory() {
         </form>
       </div>
 
-      <div className="bg-white p-6 rounded-lg shadow-md">
-        <div className="flex justify-between items-center mb-4">
-           <h2 className="text-xl font-semibold">Inventory List</h2>
+      <div className="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-gray-100">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">Inventory List</h2>
+            <p className="text-xs text-gray-500">{products.length} products total</p>
+          </div>
+          <input
+            type="text"
+            placeholder="Search products, category, SKU..."
+            className="w-full sm:w-64 p-2.5 border rounded-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-brand-green outline-none"
+            value={inventorySearch}
+            onChange={(e) => setInventorySearch(e.target.value)}
+          />
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile Product Cards (hidden on md and up) */}
+        <div className="block md:hidden space-y-3">
+          {products
+            .filter(p => {
+              const q = inventorySearch.toLowerCase();
+              return !q || p.name.toLowerCase().includes(q) ||
+                (p.category && p.category.toLowerCase().includes(q)) ||
+                (p.variants && p.variants.some(v => v.sku && v.sku.toLowerCase().includes(q)));
+            })
+            .map((product) => (
+              <div key={product.id} className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 space-y-2.5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-base">{product.name}</h3>
+                    <span className="inline-block bg-white text-gray-600 px-2 py-0.5 rounded text-xs border mt-0.5">
+                      {product.category}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEdit(product)}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-700 font-bold rounded-lg text-xs"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(product.id)}
+                      className="px-3 py-1.5 bg-red-50 text-red-600 font-bold rounded-lg text-xs"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                {/* Variants inside mobile card */}
+                <div className="space-y-1.5 pt-1">
+                  {product.variants && product.variants.map((v, index) => (
+                    <div key={index} className="bg-white p-2.5 rounded-lg border flex items-center justify-between text-xs">
+                      <div className="min-w-0">
+                        <span className="font-bold text-gray-800">{v.name}</span>
+                        {v.sku && <span className="text-gray-400 ml-1">({v.sku})</span>}
+                        <div className="text-gray-600 font-medium">Rs. {v.selling_price} / {v.measure_unit || 'Unit'}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-full font-bold text-xs ${v.stock < 5 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-800'}`}>
+                          Qty: {v.stock}
+                        </span>
+                        <button
+                          onClick={() => handleRestock(product, index)}
+                          className="bg-brand-green text-white font-bold px-2 py-1 rounded text-xs active:bg-green-700"
+                        >
+                          + Restock
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+        </div>
+
+        {/* Desktop Table (hidden on mobile, visible on md and up) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 text-xs font-semibold uppercase text-gray-500">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Variants</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-3 text-left">Product</th>
+                <th className="px-6 py-3 text-left">Category</th>
+                <th className="px-6 py-3 text-left">Variants & Stock</th>
+                <th className="px-6 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {products.map((product) => (
-                <tr key={product.id}>
-                  <td className="px-6 py-4 whitespace-nowrap font-medium">{product.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-500">{product.category}</td>
-                  <td className="px-6 py-4">
-                    <div className="space-y-1">
-                      {product.variants && product.variants.map((v, index) => (
-                        <div key={index} className="text-sm flex justify-between items-center bg-gray-50 p-1 rounded">
-                          <span>
-                            <span className="font-semibold">{v.name}</span>
-                            <span className="text-gray-500 ml-2">({v.sku})</span>
-                          </span>
-                          <span className="mx-2">Rs. {v.selling_price}</span>
-                          <span className={`${v.stock < 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>Qty: {v.stock}</span>
-                          <button onClick={() => handleRestock(product, index)} className="text-xs text-blue-600 hover:underline ml-2">Restock</button>
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button onClick={() => handleEdit(product)} className="text-indigo-600 hover:text-indigo-900 font-bold">Edit</button>
-                    <button onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-900">Delete</button>
-                  </td>
-                </tr>
-              ))}
+            <tbody className="bg-white divide-y divide-gray-200 text-sm">
+              {products
+                .filter(p => {
+                  const q = inventorySearch.toLowerCase();
+                  return !q || p.name.toLowerCase().includes(q) ||
+                    (p.category && p.category.toLowerCase().includes(q)) ||
+                    (p.variants && p.variants.some(v => v.sku && v.sku.toLowerCase().includes(q)));
+                })
+                .map((product) => (
+                  <tr key={product.id} className="hover:bg-gray-50 transition">
+                    <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-900">{product.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">{product.category}</td>
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        {product.variants && product.variants.map((v, index) => (
+                          <div key={index} className="text-xs flex justify-between items-center bg-gray-50 p-1.5 rounded">
+                            <span>
+                              <span className="font-semibold text-gray-800">{v.name}</span>
+                              <span className="text-gray-400 ml-1 font-mono">({v.sku})</span>
+                            </span>
+                            <span className="mx-2 font-medium">Rs. {v.selling_price}</span>
+                            <span className={`font-bold ${v.stock < 5 ? 'text-red-600' : 'text-green-600'}`}>
+                              Qty: {v.stock}
+                            </span>
+                            <button onClick={() => handleRestock(product, index)} className="text-xs text-blue-600 hover:underline font-semibold ml-2">
+                              Restock
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                      <button onClick={() => handleEdit(product)} className="text-indigo-600 hover:text-indigo-900 font-bold">Edit</button>
+                      <button onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-900 font-medium">Delete</button>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>

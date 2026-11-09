@@ -94,8 +94,8 @@ function ProductModal({ product, onClose, onConfirm }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg w-full max-w-md" onKeyDown={handleKeyDown}>
+    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white p-4 sm:p-6 rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92vh] overflow-y-auto" onKeyDown={handleKeyDown}>
         <h3 className="text-xl font-bold mb-4">{product.name}</h3>
 
         {/* Variant Selection */}
@@ -232,6 +232,7 @@ export default function Register() {
 
   // Payment Modal State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
 
   useEffect(() => {
     const productsRef = ref(db, 'products');
@@ -300,6 +301,7 @@ export default function Register() {
 
   const openPaymentModal = () => {
       if (cart.length === 0) return;
+      setIsMobileCartOpen(false);
       setIsPaymentModalOpen(true);
   };
 
@@ -498,9 +500,9 @@ export default function Register() {
         </div>
       </div>
 
-      {/* Cart Sidebar */}
-      <div className="w-full lg:w-96 bg-white rounded-lg shadow-lg flex flex-col h-[60vh] lg:h-auto border border-gray-200">
-        <div className="p-4 border-b bg-gray-50 rounded-t-lg">
+      {/* Desktop Cart Sidebar (hidden on mobile, visible on lg) */}
+      <div className="hidden lg:flex flex-col w-96 bg-white rounded-xl shadow-lg border border-gray-200 flex-shrink-0">
+        <div className="p-4 border-b bg-gray-50 rounded-t-xl">
           <h2 className="text-xl font-bold text-gray-800">Current Order</h2>
         </div>
 
@@ -520,7 +522,7 @@ export default function Register() {
            ))}
         </div>
 
-        <div className="p-4 border-t bg-gray-50 rounded-b-lg">
+        <div className="p-4 border-t bg-gray-50 rounded-b-xl">
           <div className="flex justify-between text-xl font-bold text-gray-800 mb-4">
               <span>Total</span>
               <span>Rs. {total.toFixed(2)}</span>
@@ -537,6 +539,89 @@ export default function Register() {
           </button>
         </div>
       </div>
+
+      {/* Mobile Floating Cart Action Bar (visible on mobile when cart > 0) */}
+      {cart.length > 0 && (
+        <div
+          onClick={() => setIsMobileCartOpen(true)}
+          className="lg:hidden fixed bottom-20 left-3 right-3 bg-brand-green hover:bg-green-700 active:scale-98 text-white p-3.5 rounded-2xl shadow-2xl flex items-center justify-between z-30 cursor-pointer transition-all border border-green-600"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="bg-white/25 px-2.5 py-1 rounded-full text-xs font-black">
+              {cart.length} item{cart.length !== 1 ? 's' : ''}
+            </span>
+            <span className="text-base font-black">Rs. {total.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs font-extrabold bg-white text-brand-green px-3.5 py-2 rounded-xl shadow-sm">
+            <span>View Cart</span>
+            <span>➔</span>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Cart Drawer Bottom Sheet */}
+      {isMobileCartOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex items-end justify-center">
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+            onClick={() => setIsMobileCartOpen(false)}
+          />
+          <div className="relative bg-white rounded-t-2xl w-full max-h-[85vh] flex flex-col shadow-2xl z-10 overflow-hidden">
+            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+              <div>
+                <h3 className="font-bold text-gray-900 text-lg">Current Order</h3>
+                <p className="text-xs text-gray-500">{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</p>
+              </div>
+              <button
+                onClick={() => setIsMobileCartOpen(false)}
+                className="w-8 h-8 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center text-lg leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {cart.map((item, index) => (
+                <div key={index} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
+                  <div className="min-w-0 flex-1 mr-2">
+                    <h4 className="font-bold text-gray-800 text-sm truncate">{item.productName}</h4>
+                    <p className="text-xs text-gray-500">
+                      {item.variantName} • {item.displayQuantity || item.quantity} {item.displayUnit || ''}
+                      {item.discount > 0 && <span className="text-green-600 ml-1">(-{item.discount}%)</span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-sm text-gray-900">
+                      Rs. {(item.finalPrice * item.quantity).toFixed(2)}
+                    </span>
+                    <button
+                      onClick={() => removeFromCart(index)}
+                      className="w-7 h-7 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold text-sm"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-4 border-t bg-gray-50 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600 font-semibold text-sm">Total Due</span>
+                <span className="text-xl font-black text-brand-green">Rs. {total.toFixed(2)}</span>
+              </div>
+              <button
+                onClick={openPaymentModal}
+                disabled={cart.length === 0 || loading}
+                className="w-full py-3.5 bg-brand-green text-white font-extrabold rounded-xl shadow-lg hover:bg-green-700 active:scale-98 transition flex items-center justify-center gap-2"
+              >
+                <span>Proceed to Checkout</span>
+                <span>➔</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Product Modal */}
       {selectedProduct && (

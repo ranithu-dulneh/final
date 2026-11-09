@@ -84,18 +84,18 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-      <div className="bg-white p-8 rounded-lg shadow-2xl max-w-lg w-full">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Checkout</h2>
-        <div className="mb-6 text-center">
-            <span className="text-gray-500 text-lg">Total Amount</span>
-            <div className="text-4xl font-bold text-brand-green mt-1">Rs. {total.toFixed(2)}</div>
+    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white p-5 sm:p-8 rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto">
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 text-center text-gray-800">Checkout</h2>
+        <div className="mb-5 text-center">
+            <span className="text-gray-500 text-sm sm:text-base">Total Amount</span>
+            <div className="text-3xl sm:text-4xl font-black text-brand-green mt-0.5">Rs. {total.toFixed(2)}</div>
         </div>
 
         {step === 'selection' && (
             <div>
-                <p className="text-center text-gray-500 mb-4 text-sm">Select Payment Method (Use Arrows + Enter)</p>
-                <div className="grid grid-cols-2 gap-4">
+                <p className="text-center text-gray-500 mb-4 text-xs sm:text-sm">Select Payment Method</p>
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
                     {methods.map(m => (
                         <div
                             key={m}
@@ -107,12 +107,18 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
                                     onConfirm({ method: m });
                                 }
                             }}
-                            className={`p-6 rounded-lg border-2 text-center cursor-pointer transition-all transform ${selectedMethod === m ? 'border-brand-green bg-green-50 scale-105 shadow-md' : 'border-gray-200 hover:border-gray-300'}`}
+                            className={`p-4 sm:p-6 rounded-xl border-2 text-center cursor-pointer transition-all active:scale-95 ${selectedMethod === m ? 'border-brand-green bg-green-50 shadow-md font-bold' : 'border-gray-200 hover:border-gray-300'}`}
                         >
-                            <div className="font-bold text-lg text-gray-700">{m}</div>
+                            <div className="font-bold text-sm sm:text-base text-gray-800">{m}</div>
                         </div>
                     ))}
                 </div>
+                <button
+                  onClick={onClose}
+                  className="w-full mt-4 py-2.5 border rounded-xl text-gray-600 text-xs sm:text-sm font-semibold hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
             </div>
         )}
 

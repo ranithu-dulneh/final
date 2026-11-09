@@ -171,12 +171,12 @@ export default function Finances() {
   return (
     <div className="space-y-6">
       {/* Date Filters */}
-      <div className="bg-white p-4 rounded-lg shadow-sm flex flex-wrap gap-4 items-center">
-        <label className="font-semibold text-gray-700">Date Range:</label>
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <label className="text-xs sm:text-sm font-bold text-gray-700">Date Range:</label>
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
-          className="p-2 border rounded"
+          className="p-2.5 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-brand-green outline-none"
         >
           <option value="today">Today</option>
           <option value="7days">Last 7 Days</option>
@@ -185,28 +185,44 @@ export default function Finances() {
         </select>
 
         {filterType === 'custom' && (
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center flex-wrap">
             <DatePicker
                 selected={startDate}
                 onChange={(date) => setStartDate(date)}
-                className="p-2 border rounded"
+                className="p-2 border rounded-lg text-xs w-28 bg-gray-50"
                 placeholderText="Start Date"
             />
-            <span className="text-gray-500">-</span>
+            <span className="text-gray-400 text-xs">to</span>
             <DatePicker
                 selected={endDate}
                 onChange={(date) => setEndDate(date)}
-                className="p-2 border rounded"
+                className="p-2 border rounded-lg text-xs w-28 bg-gray-50"
                 placeholderText="End Date"
             />
           </div>
         )}
       </div>
 
-      <div className="bg-white p-4 rounded-lg shadow-sm flex space-x-4">
-        <button onClick={() => setActiveTab('pnl')} className={`px-4 py-2 rounded ${activeTab === 'pnl' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>P&L Statement</button>
-        <button onClick={() => setActiveTab('expenses')} className={`px-4 py-2 rounded ${activeTab === 'expenses' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>Expenses</button>
-        <button onClick={() => setActiveTab('drawings')} className={`px-4 py-2 rounded ${activeTab === 'drawings' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>Drawings</button>
+      {/* Segmented Tab Navigation */}
+      <div className="flex p-1 bg-gray-200/70 rounded-xl gap-1 text-xs sm:text-sm font-bold">
+        <button
+          onClick={() => setActiveTab('pnl')}
+          className={`flex-1 py-2.5 px-2 rounded-lg transition text-center ${activeTab === 'pnl' ? 'bg-white text-brand-green shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+        >
+          P&L Report
+        </button>
+        <button
+          onClick={() => setActiveTab('expenses')}
+          className={`flex-1 py-2.5 px-2 rounded-lg transition text-center ${activeTab === 'expenses' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+        >
+          Expenses
+        </button>
+        <button
+          onClick={() => setActiveTab('drawings')}
+          className={`flex-1 py-2.5 px-2 rounded-lg transition text-center ${activeTab === 'drawings' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+        >
+          Drawings
+        </button>
       </div>
 
       {message && <div className="p-2 bg-green-100 text-green-700 rounded">{message}</div>}
@@ -302,29 +318,50 @@ export default function Finances() {
               </form>
            </div>
 
-           <div className="bg-white p-6 rounded-lg shadow overflow-auto">
-              <h3 className="text-lg font-bold mb-4">Expenses ({filterType === 'today' ? 'Today' : filterType === '7days' ? 'Last 7 Days' : filterType === 'month' ? 'This Month' : 'Custom Range'})</h3>
-              <table className="min-w-full">
-                 <thead>
-                    <tr className="text-left text-xs font-medium text-gray-500 uppercase">
-                       <th className="pb-2">Date</th>
-                       <th className="pb-2">Category</th>
-                       <th className="pb-2">Desc</th>
-                       <th className="pb-2 text-right">Amount</th>
-                    </tr>
-                 </thead>
-                 <tbody>
-                    {filteredExpenses.map(e => (
-                       <tr key={e.id} className="border-t">
-                          <td className="py-2 text-sm">{new Date(e.expense_date).toLocaleDateString()}</td>
-                          <td className="py-2 text-sm font-medium">{e.category}</td>
-                          <td className="py-2 text-sm text-gray-500">{e.description}</td>
-                          <td className="py-2 text-sm font-bold text-right">Rs. {parseFloat(e.amount).toFixed(2)}</td>
-                       </tr>
-                    ))}
-                 </tbody>
-              </table>
-              {filteredExpenses.length === 0 && <p className="text-gray-500 text-center py-4">No expenses found for this period.</p>}
+           <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100">
+              <h3 className="text-base sm:text-lg font-bold mb-3 text-gray-800">
+                Expenses ({filterType === 'today' ? 'Today' : filterType === '7days' ? 'Last 7 Days' : filterType === 'month' ? 'This Month' : 'Custom'})
+              </h3>
+
+              {/* Mobile Cards */}
+              <div className="block md:hidden space-y-2">
+                {filteredExpenses.map(e => (
+                  <div key={e.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-bold text-gray-800 block text-sm">{e.category}</span>
+                      <span className="text-gray-500">{e.description}</span>
+                      <span className="text-[10px] text-gray-400 block mt-0.5">{new Date(e.expense_date).toLocaleDateString()}</span>
+                    </div>
+                    <span className="font-black text-red-600 text-sm">Rs. {parseFloat(e.amount).toFixed(2)}</span>
+                  </div>
+                ))}
+                {filteredExpenses.length === 0 && <p className="text-gray-400 text-center py-4 text-xs">No expenses found for this period.</p>}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-auto">
+                <table className="min-w-full">
+                   <thead>
+                      <tr className="text-left text-xs font-semibold text-gray-500 uppercase">
+                         <th className="pb-2">Date</th>
+                         <th className="pb-2">Category</th>
+                         <th className="pb-2">Description</th>
+                         <th className="pb-2 text-right">Amount</th>
+                      </tr>
+                   </thead>
+                   <tbody className="divide-y divide-gray-100">
+                      {filteredExpenses.map(e => (
+                         <tr key={e.id} className="text-sm">
+                            <td className="py-2.5 text-gray-500">{new Date(e.expense_date).toLocaleDateString()}</td>
+                            <td className="py-2.5 font-bold text-gray-800">{e.category}</td>
+                            <td className="py-2.5 text-gray-600">{e.description}</td>
+                            <td className="py-2.5 font-black text-right text-red-600">Rs. {parseFloat(e.amount).toFixed(2)}</td>
+                         </tr>
+                      ))}
+                   </tbody>
+                </table>
+                {filteredExpenses.length === 0 && <p className="text-gray-400 text-center py-4 text-xs">No expenses found for this period.</p>}
+              </div>
            </div>
         </div>
       )}
@@ -356,27 +393,47 @@ export default function Finances() {
               </form>
            </div>
 
-           <div className="bg-white p-6 rounded-lg shadow overflow-auto">
-              <h3 className="text-lg font-bold mb-4">Drawings ({filterType === 'today' ? 'Today' : filterType === '7days' ? 'Last 7 Days' : filterType === 'month' ? 'This Month' : 'Custom Range'})</h3>
-              <table className="min-w-full">
-                 <thead>
-                    <tr className="text-left text-xs font-medium text-gray-500 uppercase">
-                       <th className="pb-2">Date</th>
-                       <th className="pb-2">Note</th>
-                       <th className="pb-2 text-right">Amount</th>
-                    </tr>
-                 </thead>
-                 <tbody>
-                    {filteredDrawings.map(d => (
-                       <tr key={d.id} className="border-t">
-                          <td className="py-2 text-sm">{new Date(d.drawing_date).toLocaleDateString()}</td>
-                          <td className="py-2 text-sm text-gray-500">{d.description}</td>
-                          <td className="py-2 text-sm font-bold text-right">Rs. {parseFloat(d.amount).toFixed(2)}</td>
-                       </tr>
-                    ))}
-                 </tbody>
-              </table>
-              {filteredDrawings.length === 0 && <p className="text-gray-500 text-center py-4">No drawings found for this period.</p>}
+           <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100">
+              <h3 className="text-base sm:text-lg font-bold mb-3 text-gray-800">
+                Drawings ({filterType === 'today' ? 'Today' : filterType === '7days' ? 'Last 7 Days' : filterType === 'month' ? 'This Month' : 'Custom'})
+              </h3>
+
+              {/* Mobile Cards */}
+              <div className="block md:hidden space-y-2">
+                {filteredDrawings.map(d => (
+                  <div key={d.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-bold text-gray-800 block text-sm">{d.description || 'Owner Drawing'}</span>
+                      <span className="text-[10px] text-gray-400 block mt-0.5">{new Date(d.drawing_date).toLocaleDateString()}</span>
+                    </div>
+                    <span className="font-black text-orange-600 text-sm">Rs. {parseFloat(d.amount).toFixed(2)}</span>
+                  </div>
+                ))}
+                {filteredDrawings.length === 0 && <p className="text-gray-400 text-center py-4 text-xs">No drawings found for this period.</p>}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-auto">
+                <table className="min-w-full">
+                   <thead>
+                      <tr className="text-left text-xs font-semibold text-gray-500 uppercase">
+                         <th className="pb-2">Date</th>
+                         <th className="pb-2">Note / Description</th>
+                         <th className="pb-2 text-right">Amount</th>
+                      </tr>
+                   </thead>
+                   <tbody className="divide-y divide-gray-100">
+                      {filteredDrawings.map(d => (
+                         <tr key={d.id} className="text-sm">
+                            <td className="py-2.5 text-gray-500">{new Date(d.drawing_date).toLocaleDateString()}</td>
+                            <td className="py-2.5 text-gray-800 font-medium">{d.description || '-'}</td>
+                            <td className="py-2.5 font-black text-right text-orange-600">Rs. {parseFloat(d.amount).toFixed(2)}</td>
+                         </tr>
+                      ))}
+                   </tbody>
+                </table>
+                {filteredDrawings.length === 0 && <p className="text-gray-400 text-center py-4 text-xs">No drawings found for this period.</p>}
+              </div>
            </div>
          </div>
       )}
