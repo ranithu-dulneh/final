@@ -5,7 +5,9 @@ import { ref, onValue, push, serverTimestamp } from 'firebase/database';
 export default function Creditors() {
   const [customersData, setCustomersData] = useState({});
   const [settlementsData, setSettlementsData] = useState({});
-  const [showSettled, setShowSettled] = useState(false);
+  
+  // Filter status: 'active' | 'all' | 'settled'
+  const [filterStatus, setFilterStatus] = useState('active');
   const [selectedCreditor, setSelectedCreditor] = useState(null); // For Profile Modal
   const [settlementCreditor, setSettlementCreditor] = useState(null); // For Settlement Modal
   const [isAddModalOpen, setIsAddModalOpen] = useState(false); // For Add Creditor Modal
@@ -34,11 +36,10 @@ export default function Creditors() {
   const [existingSearchQuery, setExistingSearchQuery] = useState('');
 
   // Conflict Resolution State
-  // When an entered name matches an existing creditor
   const [duplicateConflict, setDuplicateConflict] = useState(null); // { existingCreditor, pendingRecord }
-  const [renamePrompt, setRenamePrompt] = useState(null); // { existingCreditor, pendingRecord, suggestedName, currentName }
+  const [renamePrompt, setRenamePrompt] = useState(null); // { existingCreditor, pendingRecord, suggestions, currentName }
 
-  // Search State for Main Table
+  // Search State for Main List
   const [searchTerm, setSearchTerm] = useState('');
 
   const nameInputRef = useRef(null);
@@ -159,16 +160,44 @@ export default function Creditors() {
     })).sort((a, b) => b.balance - a.balance);
   }, [customersData, settlementsData]);
 
-  // Main table filter
+  // Overall Statistics
+  const stats = useMemo(() => {
+    let totalOutstanding = 0;
+    let totalSettled = 0;
+    let activeCount = 0;
+    let settledCount = 0;
+
+    creditors.forEach(c => {
+      if (c.balance > 0.01) {
+        totalOutstanding += c.balance;
+        activeCount++;
+      } else {
+        settledCount++;
+      }
+      totalSettled += c.settled;
+    });
+
+    return {
+      totalOutstanding,
+      totalSettled,
+      activeCount,
+      settledCount,
+      totalCount: creditors.length
+    };
+  }, [creditors]);
+
+  // Main list filter
   const filteredCreditors = useMemo(() => {
     return creditors.filter(c => {
-      const matchesShow = showSettled ? true : c.balance > 0.01;
+      let matchesStatus = true;
+      if (filterStatus === 'active') matchesStatus = c.balance > 0.01;
+      else if (filterStatus === 'settled') matchesStatus = c.balance <= 0.01;
 
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = searchTerm === '' ||
+      const searchLower = searchTerm.toLowerCase().trim();
+      const matchesSearch = searchLower === '' ||
         c.name.toLowerCase().includes(searchLower) ||
-        c.phone.toLowerCase().includes(searchLower) ||
-        c.idNo.toLowerCase().includes(searchLower) ||
+        (c.phone && c.phone.toLowerCase().includes(searchLower)) ||
+        (c.idNo && c.idNo.toLowerCase().includes(searchLower)) ||
         (c.address && c.address.toLowerCase().includes(searchLower)) ||
         c.transactions.some(t =>
           (t.receiptId && t.receiptId.toLowerCase().includes(searchLower)) ||
@@ -176,9 +205,9 @@ export default function Creditors() {
           (t.note && t.note.toLowerCase().includes(searchLower))
         );
 
-      return matchesShow && matchesSearch;
+      return matchesStatus && matchesSearch;
     });
-  }, [creditors, showSettled, searchTerm]);
+  }, [creditors, filterStatus, searchTerm]);
 
   // Search existing creditors in the Add Creditor modal
   const searchedExistingCreditors = useMemo(() => {
@@ -189,7 +218,7 @@ export default function Creditors() {
       (c.phone && c.phone.toLowerCase().includes(q)) ||
       (c.idNo && c.idNo.toLowerCase().includes(q)) ||
       (c.address && c.address.toLowerCase().includes(q))
-    ).slice(0, 6);
+    ).slice(0, 5);
   }, [creditors, existingSearchQuery]);
 
   // Generate smart name suggestions for new account when duplicate name occurs
@@ -197,21 +226,18 @@ export default function Creditors() {
     const suggestions = [];
     const lower = baseName.toLowerCase().trim();
 
-    // 1. Numbered: Name (2), Name (3), etc.
     let num = 2;
     while (creditors.some(c => c.name.toLowerCase().trim() === `${lower} (${num})`)) {
       num++;
     }
     suggestions.push(`${baseName.trim()} (${num})`);
 
-    // 2. ID / NIC based
     if (idNo && idNo.trim()) {
       suggestions.push(`${baseName.trim()} [${idNo.trim()}]`);
     } else {
       suggestions.push(`${baseName.trim()} - New`);
     }
 
-    // 3. Address based
     if (address && address.trim()) {
       suggestions.push(`${baseName.trim()} (${address.trim()})`);
     }
@@ -362,7 +388,6 @@ export default function Creditors() {
     );
 
     if (existingMatch) {
-      // Conflict detected! Ask operator: Add to existing account OR create new account?
       setDuplicateConflict({
         existingCreditor: existingMatch,
         pendingRecord
@@ -385,7 +410,6 @@ export default function Creditors() {
       ...pendingRecord,
       name: existingCreditor.name,
       creditorKey: existingCreditor.key,
-      // Retain or complement existing phone / idNo
       phone: existingCreditor.phone !== '-' ? existingCreditor.phone : pendingRecord.phone,
       idNo: existingCreditor.idNo !== '-' ? existingCreditor.idNo : pendingRecord.idNo
     };
@@ -430,7 +454,6 @@ export default function Creditors() {
       return;
     }
 
-    // Generate unique key to prevent grouping with the existing account
     const newUniqueKey = `c_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const finalRecord = {
       ...renamePrompt.pendingRecord,
@@ -474,56 +497,238 @@ export default function Creditors() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-6xl mx-auto">
-      {/* Header & Controls */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">Creditors Management</h2>
-          <p className="text-xs text-gray-500 mt-1">Track customer debts, manual credits, and settlements</p>
+    <div className="w-full max-w-6xl mx-auto space-y-4 pb-8">
+      {/* 1. TOP STATS BAR (Mobile & Desktop) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4">
+        <div className="bg-white p-3 sm:p-4 rounded-xl border border-red-100 shadow-sm flex flex-col justify-between">
+          <span className="text-[11px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Total Due
+          </span>
+          <div className="text-lg sm:text-2xl font-black text-red-600 mt-1 truncate">
+            Rs. {stats.totalOutstanding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <span className="text-[10px] sm:text-xs text-red-400 mt-0.5">
+            {stats.activeCount} active creditor{stats.activeCount !== 1 ? 's' : ''}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-          {/* Add Creditor Button */}
+        <div className="bg-white p-3 sm:p-4 rounded-xl border border-green-100 shadow-sm flex flex-col justify-between">
+          <span className="text-[11px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Total Settled
+          </span>
+          <div className="text-lg sm:text-2xl font-black text-green-600 mt-1 truncate">
+            Rs. {stats.totalSettled.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <span className="text-[10px] sm:text-xs text-green-500 mt-0.5">
+            {stats.settledCount} fully paid
+          </span>
+        </div>
+
+        <div className="col-span-2 sm:col-span-1 bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wide block">
+              Total Accounts
+            </span>
+            <span className="text-xl sm:text-2xl font-black text-gray-800">
+              {stats.totalCount}
+            </span>
+          </div>
           <button
             onClick={() => handleOpenAddModal()}
-            className="bg-brand-green hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow flex items-center gap-2 transition"
+            className="bg-brand-green hover:bg-green-700 active:scale-95 text-white font-bold px-4 py-2.5 rounded-lg shadow flex items-center gap-1.5 text-xs sm:text-sm transition-all"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add Creditor
+            <span className="text-base leading-none">+</span>
+            <span>Add Creditor</span>
           </button>
-
-          {/* Search Box for Main List */}
-          <input
-            type="text"
-            placeholder="Search Name, Phone, ID No..."
-            className="p-2 border rounded-lg flex-1 sm:w-60 focus:ring-2 focus:ring-brand-green outline-none"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-          />
-
-          {/* Show Settled Toggle */}
-          <div className="flex items-center space-x-2 whitespace-nowrap bg-white p-2 rounded-lg border shadow-sm">
-            <span className="text-xs sm:text-sm text-gray-600">Show Settled</span>
-            <button
-              onClick={() => setShowSettled(!showSettled)}
-              className={`w-10 h-5 rounded-full p-0.5 transition-colors ${showSettled ? 'bg-brand-green' : 'bg-gray-300'}`}
-              type="button"
-            >
-              <div className={`bg-white w-4 h-4 rounded-full shadow transform transition-transform ${showSettled ? 'translate-x-5' : ''}`}></div>
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Creditors Table */}
-      <div className="bg-white rounded-lg shadow overflow-x-auto border border-gray-100">
+      {/* 2. SEARCH & FILTER CONTROLS */}
+      <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-gray-100 space-y-3">
+        <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
+          {/* Search Box with Clear Button */}
+          <div className="relative flex-1">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400 text-sm">
+              🔍
+            </span>
+            <input
+              type="text"
+              placeholder="Search by name, phone, NIC, address..."
+              className="w-full pl-9 pr-9 py-2.5 border rounded-lg text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none bg-gray-50 focus:bg-white transition"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 text-base"
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Quick Add Button (Prominent on Mobile) */}
+          <button
+            onClick={() => handleOpenAddModal()}
+            className="sm:hidden w-full bg-brand-green hover:bg-green-700 active:bg-green-800 text-white font-bold py-3 px-4 rounded-lg shadow flex items-center justify-center gap-2 text-sm"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            <span>+ Add New Creditor</span>
+          </button>
+        </div>
+
+        {/* Segmented Filter Pills */}
+        <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-lg text-xs font-semibold overflow-x-auto">
+          <button
+            onClick={() => setFilterStatus('active')}
+            className={`flex-1 min-w-[90px] py-2 px-3 rounded-md transition text-center whitespace-nowrap ${
+              filterStatus === 'active'
+                ? 'bg-white text-brand-green shadow-sm font-bold'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            With Balance ({stats.activeCount})
+          </button>
+          <button
+            onClick={() => setFilterStatus('all')}
+            className={`flex-1 min-w-[70px] py-2 px-3 rounded-md transition text-center whitespace-nowrap ${
+              filterStatus === 'all'
+                ? 'bg-white text-brand-green shadow-sm font-bold'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            All ({stats.totalCount})
+          </button>
+          <button
+            onClick={() => setFilterStatus('settled')}
+            className={`flex-1 min-w-[80px] py-2 px-3 rounded-md transition text-center whitespace-nowrap ${
+              filterStatus === 'settled'
+                ? 'bg-white text-brand-green shadow-sm font-bold'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Settled ({stats.settledCount})
+          </button>
+        </div>
+      </div>
+
+      {/* 3. MOBILE VIEW: TOUCH-FRIENDLY CARDS (hidden on md and up) */}
+      <div className="block md:hidden space-y-3">
+        {filteredCreditors.map(creditor => (
+          <div
+            key={creditor.key}
+            className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:border-green-200 transition space-y-3"
+          >
+            {/* Header: Name, ID, & Balance Badge */}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-gray-900 text-base leading-tight truncate">
+                  {creditor.name}
+                </h3>
+                {creditor.idNo !== '-' && (
+                  <span className="inline-block mt-0.5 bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[11px] font-mono">
+                    NIC: {creditor.idNo}
+                  </span>
+                )}
+              </div>
+              <div className="text-right flex-shrink-0">
+                {creditor.balance > 0.01 ? (
+                  <span className="inline-block bg-red-50 text-red-700 border border-red-200 font-extrabold text-sm px-2.5 py-1 rounded-lg">
+                    Rs. {creditor.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                ) : (
+                  <span className="inline-block bg-green-50 text-green-700 border border-green-200 font-bold text-xs px-2.5 py-1 rounded-lg">
+                    ✓ Settled
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Creditor Details: Phone & Address */}
+            <div className="text-xs text-gray-600 space-y-1 bg-gray-50 p-2.5 rounded-lg">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">Mobile:</span>
+                {creditor.phone !== '-' ? (
+                  <a
+                    href={`tel:${creditor.phone}`}
+                    className="font-semibold text-brand-green flex items-center gap-1 active:underline"
+                  >
+                    <span>📞 {creditor.phone}</span>
+                    <span className="text-[10px] bg-green-100 px-1 rounded text-green-800">Call</span>
+                  </a>
+                ) : (
+                  <span className="text-gray-400">Not provided</span>
+                )}
+              </div>
+
+              {creditor.address && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Address:</span>
+                  <span className="text-gray-800 truncate max-w-[200px]">📍 {creditor.address}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1 border-t border-gray-200/60 text-[11px]">
+                <span className="text-gray-500">Total Debt: Rs. {creditor.debt.toFixed(2)}</span>
+                <span className="text-gray-500">Paid: Rs. {creditor.settled.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Big Touch-Friendly Action Buttons */}
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setSettlementCreditor(creditor);
+                  setSettlementAmount('');
+                  setSettlementNote('');
+                }}
+                className="py-2.5 px-2 bg-brand-green hover:bg-green-700 active:bg-green-800 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1 shadow-sm"
+              >
+                <span>💰</span>
+                <span>Pay</span>
+              </button>
+
+              <button
+                onClick={() => handleOpenAddModal(creditor)}
+                className="py-2.5 px-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1 shadow-sm"
+              >
+                <span>➕</span>
+                <span>Debt</span>
+              </button>
+
+              <button
+                onClick={() => setSelectedCreditor(creditor)}
+                className="py-2.5 px-2 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 rounded-lg font-bold text-xs flex items-center justify-center gap-1 border border-gray-200"
+              >
+                <span>👤</span>
+                <span>History</span>
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {filteredCreditors.length === 0 && (
+          <div className="bg-white p-8 rounded-xl text-center border border-dashed border-gray-300">
+            <span className="text-3xl block mb-2">📋</span>
+            <p className="text-gray-500 text-sm font-medium">No creditors found</p>
+            <p className="text-gray-400 text-xs mt-1">
+              {searchTerm ? 'Try a different search query' : 'Tap "+ Add Creditor" to create your first record'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* 4. DESKTOP VIEW: DATA TABLE (visible on md and up) */}
+      <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
         <table className="w-full text-left border-collapse">
-          <thead className="bg-gray-50 text-gray-600 font-semibold border-b text-sm">
+          <thead className="bg-gray-50 text-gray-600 font-semibold border-b text-xs uppercase tracking-wider">
             <tr>
-              <th className="p-4">Name</th>
-              <th className="p-4">ID No / NIC</th>
+              <th className="p-4">Creditor Name</th>
+              <th className="p-4">ID / NIC No</th>
               <th className="p-4">Mobile No</th>
               <th className="p-4 text-right">Total Debt</th>
               <th className="p-4 text-right">Settled</th>
@@ -533,31 +738,43 @@ export default function Creditors() {
           </thead>
           <tbody className="divide-y divide-gray-100 text-sm">
             {filteredCreditors.map(creditor => (
-              <tr key={creditor.key} className="hover:bg-gray-50 transition">
-                <td className="p-4 font-medium text-gray-800">
+              <tr key={creditor.key} className="hover:bg-gray-50/80 transition">
+                <td className="p-4 font-semibold text-gray-800">
                   <div>{creditor.name}</div>
                   {creditor.address && (
-                    <div className="text-xs text-gray-400 truncate max-w-xs">{creditor.address}</div>
+                    <div className="text-xs text-gray-400 truncate max-w-xs">📍 {creditor.address}</div>
                   )}
                 </td>
                 <td className="p-4 text-gray-600">
                   {creditor.idNo !== '-' ? (
-                    <span className="bg-gray-100 px-2 py-0.5 rounded text-xs font-mono text-gray-700">{creditor.idNo}</span>
+                    <span className="bg-gray-100 px-2 py-0.5 rounded text-xs font-mono text-gray-700">
+                      {creditor.idNo}
+                    </span>
                   ) : (
                     <span className="text-gray-400">-</span>
                   )}
                 </td>
                 <td className="p-4 text-gray-600">
-                  {creditor.phone !== '-' ? creditor.phone : <span className="text-gray-400">-</span>}
+                  {creditor.phone !== '-' ? (
+                    <a href={`tel:${creditor.phone}`} className="text-brand-green hover:underline">
+                      {creditor.phone}
+                    </a>
+                  ) : (
+                    <span className="text-gray-400">-</span>
+                  )}
                 </td>
-                <td className="p-4 text-right text-red-500 font-semibold">
+                <td className="p-4 text-right text-gray-600 font-medium">
                   Rs. {creditor.debt.toFixed(2)}
                 </td>
-                <td className="p-4 text-right text-green-600 font-semibold">
+                <td className="p-4 text-right text-green-600 font-medium">
                   Rs. {creditor.settled.toFixed(2)}
                 </td>
-                <td className="p-4 text-right font-bold text-gray-800">
-                  Rs. {creditor.balance.toFixed(2)}
+                <td className="p-4 text-right font-bold text-base">
+                  {creditor.balance > 0.01 ? (
+                    <span className="text-red-600">Rs. {creditor.balance.toFixed(2)}</span>
+                  ) : (
+                    <span className="text-green-600 text-xs font-semibold bg-green-50 px-2 py-0.5 rounded">Settled</span>
+                  )}
                 </td>
                 <td className="p-4 text-center">
                   <div className="flex items-center justify-center gap-1.5 flex-wrap">
@@ -567,21 +784,21 @@ export default function Creditors() {
                         setSettlementAmount('');
                         setSettlementNote('');
                       }}
-                      className="bg-brand-green text-white px-2.5 py-1 rounded text-xs font-medium hover:bg-green-700 transition"
+                      className="bg-brand-green hover:bg-green-700 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
                       title="Add payment settlement"
                     >
                       Pay
                     </button>
                     <button
                       onClick={() => handleOpenAddModal(creditor)}
-                      className="bg-amber-100 text-amber-800 hover:bg-amber-200 px-2.5 py-1 rounded text-xs font-medium transition"
+                      className="bg-amber-100 hover:bg-amber-200 text-amber-900 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
                       title="Add more debt/credit to this creditor"
                     >
                       + Debt
                     </button>
                     <button
                       onClick={() => setSelectedCreditor(creditor)}
-                      className="bg-gray-100 text-gray-700 hover:bg-gray-200 px-2.5 py-1 rounded text-xs font-medium transition"
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
                       title="View full transaction profile"
                     >
                       Profile
@@ -592,8 +809,8 @@ export default function Creditors() {
             ))}
             {filteredCreditors.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-8 text-center text-gray-400">
-                  {searchTerm ? 'No creditors match your search query.' : 'No creditors found. Click "+ Add Creditor" to create one.'}
+                <td colSpan="7" className="p-8 text-center text-gray-400 text-sm">
+                  {searchTerm ? 'No creditors match your search query.' : 'No creditors found.'}
                 </td>
               </tr>
             )}
@@ -601,34 +818,34 @@ export default function Creditors() {
         </table>
       </div>
 
-      {/* Add Creditor / Manual Credit Modal */}
+      {/* 5. ADD CREDITOR / MANUAL CREDIT MODAL */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
-            <div className="p-5 border-b bg-gray-50 flex justify-between items-center">
+            <div className="p-4 sm:p-5 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
               <div>
-                <h3 className="text-lg font-bold text-gray-800">
+                <h3 className="text-base sm:text-lg font-bold text-gray-900">
                   {formMode === 'existing' ? `Add Debt to ${formData.name}` : 'Add Creditor Manually'}
                 </h3>
-                <p className="text-xs text-gray-500">Record creditor debt without creating a purchase order</p>
+                <p className="text-xs text-gray-500">Record debt without purchase order</p>
               </div>
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+                className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 hover:bg-gray-300 flex items-center justify-center text-lg leading-none"
               >
                 &times;
               </button>
             </div>
 
-            <form onSubmit={handleFormSubmit} className="p-6 overflow-y-auto space-y-4 flex-1">
+            <form onSubmit={handleFormSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-3.5 flex-1 text-sm">
               {/* SEARCH BAR FOR EXISTING CREDITORS */}
-              <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1 flex items-center justify-between">
-                  <span>Search Existing Creditors</span>
+              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1 flex items-center justify-between">
+                  <span>Search Existing Creditor</span>
                   {formMode === 'existing' && (
-                    <span className="text-[11px] text-green-700 font-bold bg-green-100 px-2 py-0.5 rounded">
-                      Linked to Existing Account
+                    <span className="text-[10px] text-green-700 font-bold bg-green-100 px-2 py-0.5 rounded">
+                      Linked to Account
                     </span>
                   )}
                 </label>
@@ -643,24 +860,24 @@ export default function Creditors() {
                     <button
                       type="button"
                       onClick={handleClearSelectedExisting}
-                      className="text-xs text-red-600 hover:text-red-800 font-semibold underline ml-2"
+                      className="text-xs text-red-600 hover:text-red-800 font-bold underline ml-2"
                     >
-                      Change / New
+                      Change
                     </button>
                   </div>
                 ) : (
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="Type name, phone, or ID to find existing creditor..."
+                      placeholder="Type name, phone, or ID to find..."
                       value={existingSearchQuery}
                       onChange={e => setExistingSearchQuery(e.target.value)}
-                      className="w-full border rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-brand-green outline-none"
+                      className="w-full border rounded-lg p-2.5 text-xs sm:text-sm bg-white focus:ring-2 focus:ring-brand-green outline-none"
                     />
 
-                    {/* Instant Search Results Dropdown */}
+                    {/* Instant Search Results */}
                     {searchedExistingCreditors.length > 0 && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto divide-y">
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-20 max-h-44 overflow-y-auto divide-y">
                         {searchedExistingCreditors.map(ec => (
                           <div
                             key={ec.key}
@@ -681,71 +898,65 @@ export default function Creditors() {
                         ))}
                       </div>
                     )}
-                    {existingSearchQuery.trim() && searchedExistingCreditors.length === 0 && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 p-2.5 text-xs text-gray-400 text-center">
-                        No existing creditors match. You can fill out the form below to create a new profile.
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
 
               {/* Creditor Name (Required) */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
                   Creditor Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   ref={nameInputRef}
                   type="text"
                   required
-                  placeholder="e.g. John Doe / Farm Supplies Co."
+                  placeholder="e.g. John Perera / Agro Supplies"
                   value={formData.name}
                   onChange={e => {
                     setFormData({ ...formData, name: e.target.value });
                     if (formMode === 'existing') {
-                      // If user edits name manually, detach from existing creditorKey
                       setFormData(prev => ({ ...prev, name: e.target.value, creditorKey: '' }));
                       setFormMode('new');
                     }
                   }}
-                  className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                  className="w-full border rounded-lg p-3 text-base focus:ring-2 focus:ring-brand-green outline-none"
                   autoFocus
                 />
               </div>
 
-              {/* Grid: ID No & Mobile No */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* ID No & Mobile No */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ID / NIC No <span className="text-gray-400 text-xs">(Optional)</span>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                    ID / NIC No <span className="text-gray-400 font-normal">(Optional)</span>
                   </label>
                   <input
                     type="text"
                     placeholder="e.g. 199012345678"
                     value={formData.idNo}
                     onChange={e => setFormData({ ...formData, idNo: e.target.value })}
-                    className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Mobile No <span className="text-gray-400 text-xs">(Optional)</span>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                    Mobile No <span className="text-gray-400 font-normal">(Optional)</span>
                   </label>
                   <input
                     type="tel"
                     placeholder="e.g. 0771234567"
                     value={formData.phone}
                     onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
                   />
                 </div>
               </div>
 
-              {/* Grid: Amount & Date */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Amount & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
                     Amount (Rs.) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -756,11 +967,11 @@ export default function Creditors() {
                     placeholder="0.00"
                     value={formData.amount}
                     onChange={e => setFormData({ ...formData, amount: e.target.value })}
-                    className="w-full border rounded-lg p-2.5 text-sm font-bold text-gray-800 focus:ring-2 focus:ring-brand-green outline-none"
+                    className="w-full border rounded-lg p-2.5 text-base font-black text-gray-900 focus:ring-2 focus:ring-brand-green outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
                     Date <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -768,58 +979,58 @@ export default function Creditors() {
                     required
                     value={formData.date}
                     onChange={e => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
                   />
                 </div>
               </div>
 
-              {/* Description / Reason */}
+              {/* Reason / Note */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reason / Description / Note <span className="text-gray-400 text-xs">(Optional)</span>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Reason / Description <span className="text-gray-400 font-normal">(Optional)</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Previous balance, Direct supply of fertilizer, Invoice #450"
+                  placeholder="e.g. Fertilizer supply, Opening balance"
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                  className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
                 />
               </div>
 
-              {/* Grid: Address & Due Date */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Address & Due Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Address / Town <span className="text-gray-400 text-xs">(Optional)</span>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                    Address / Town <span className="text-gray-400 font-normal">(Optional)</span>
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Galle Road, Matara"
+                    placeholder="e.g. Galle Road"
                     value={formData.address}
                     onChange={e => setFormData({ ...formData, address: e.target.value })}
-                    className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Settlement Due Date <span className="text-gray-400 text-xs">(Optional)</span>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                    Due Date <span className="text-gray-400 font-normal">(Optional)</span>
                   </label>
                   <input
                     type="date"
                     value={formData.dueDate}
                     onChange={e => setFormData({ ...formData, dueDate: e.target.value })}
-                    className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
                   />
                 </div>
               </div>
 
-              {/* Form Actions */}
-              <div className="pt-4 flex justify-end space-x-3 border-t">
+              {/* Sticky / Touch Footer */}
+              <div className="pt-3 border-t flex gap-2">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 border rounded-lg text-gray-600 hover:bg-gray-100 transition"
+                  className="flex-1 py-3 border rounded-lg text-gray-600 font-bold hover:bg-gray-100 transition text-center"
                   disabled={formSubmitting}
                 >
                   Cancel
@@ -827,7 +1038,7 @@ export default function Creditors() {
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="px-5 py-2 bg-brand-green text-white font-semibold rounded-lg hover:bg-green-700 transition flex items-center gap-2"
+                  className="flex-1 py-3 bg-brand-green text-white font-bold rounded-lg hover:bg-green-700 active:bg-green-800 transition shadow"
                 >
                   {formSubmitting ? 'Saving...' : 'Save Creditor'}
                 </button>
@@ -837,109 +1048,91 @@ export default function Creditors() {
         </div>
       )}
 
-      {/* POPUP 1: DUPLICATE NAME CONFLICT RESOLUTION */}
+      {/* 6. DUPLICATE NAME CONFLICT POPUP */}
       {duplicateConflict && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-60 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl overflow-hidden border border-amber-200 animate-fadeIn">
-            <div className="p-5 bg-amber-50 border-b border-amber-200 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xl flex-shrink-0">
-                ⚠️
-              </div>
+        <div className="fixed inset-0 bg-black/60 z-60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden border border-amber-200">
+            <div className="p-4 sm:p-5 bg-amber-50 border-b border-amber-200 flex items-center gap-3">
+              <span className="text-2xl">⚠️</span>
               <div>
-                <h3 className="text-lg font-bold text-gray-800">Creditor Already Exists</h3>
-                <p className="text-xs text-amber-800">A creditor with this name is already registered.</p>
+                <h3 className="text-base sm:text-lg font-bold text-gray-900">Creditor Already Exists</h3>
+                <p className="text-xs text-amber-800">A creditor with this name was found</p>
               </div>
             </div>
 
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-700 leading-relaxed">
-                A profile for <strong className="text-gray-900 font-bold">"{duplicateConflict.existingCreditor.name}"</strong> already exists in the system:
+            <div className="p-4 sm:p-6 space-y-4">
+              <p className="text-xs sm:text-sm text-gray-700">
+                A profile for <strong className="text-gray-900 font-bold">"{duplicateConflict.existingCreditor.name}"</strong> already exists:
               </p>
 
-              {/* Existing Creditor Summary Card */}
-              <div className="bg-gray-50 border rounded-lg p-3 text-xs space-y-1">
+              <div className="bg-gray-50 border rounded-xl p-3 text-xs space-y-1.5">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Current Balance Due:</span>
-                  <span className="font-bold text-red-600">Rs. {duplicateConflict.existingCreditor.balance.toFixed(2)}</span>
+                  <span className="text-gray-500">Balance Due:</span>
+                  <span className="font-extrabold text-red-600">Rs. {duplicateConflict.existingCreditor.balance.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Mobile Phone:</span>
-                  <span className="text-gray-800 font-medium">{duplicateConflict.existingCreditor.phone !== '-' ? duplicateConflict.existingCreditor.phone : 'Not provided'}</span>
+                  <span className="text-gray-500">Mobile:</span>
+                  <span className="text-gray-800 font-medium">{duplicateConflict.existingCreditor.phone !== '-' ? duplicateConflict.existingCreditor.phone : 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">ID / NIC No:</span>
-                  <span className="text-gray-800 font-medium">{duplicateConflict.existingCreditor.idNo !== '-' ? duplicateConflict.existingCreditor.idNo : 'Not provided'}</span>
+                  <span className="text-gray-500">ID / NIC:</span>
+                  <span className="text-gray-800 font-medium">{duplicateConflict.existingCreditor.idNo !== '-' ? duplicateConflict.existingCreditor.idNo : 'N/A'}</span>
                 </div>
-                {duplicateConflict.existingCreditor.address && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Address:</span>
-                    <span className="text-gray-800 font-medium truncate max-w-[200px]">{duplicateConflict.existingCreditor.address}</span>
-                  </div>
-                )}
               </div>
 
-              <div className="border-t pt-3">
-                <p className="text-xs text-gray-600 font-semibold mb-3">
-                  How would you like to handle the Rs. {duplicateConflict.pendingRecord.amount.toFixed(2)} credit?
-                </p>
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleResolveAddToExisting}
+                  disabled={formSubmitting}
+                  className="w-full py-3 px-4 bg-brand-green hover:bg-green-700 active:bg-green-800 text-white rounded-xl font-bold text-sm shadow flex items-center justify-between"
+                >
+                  <span>Add to Existing Account</span>
+                  <span>➔</span>
+                </button>
 
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={handleResolveAddToExisting}
-                    disabled={formSubmitting}
-                    className="w-full p-3 bg-brand-green hover:bg-green-700 text-white rounded-lg font-semibold text-sm shadow flex items-center justify-between transition"
-                  >
-                    <span>Add to Existing Account</span>
-                    <span>➔</span>
-                  </button>
+                <button
+                  type="button"
+                  onClick={handleResolveCreateNewAccount}
+                  className="w-full py-3 px-4 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-800 border border-blue-200 rounded-xl font-bold text-sm flex items-center justify-between"
+                >
+                  <span>Create a New Account</span>
+                  <span>➔</span>
+                </button>
 
-                  <button
-                    type="button"
-                    onClick={handleResolveCreateNewAccount}
-                    className="w-full p-3 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg font-semibold text-sm flex items-center justify-between transition"
-                  >
-                    <span>Create a New Account</span>
-                    <span>➔</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setDuplicateConflict(null)}
-                    className="w-full py-2 text-xs text-gray-500 hover:text-gray-700 text-center"
-                  >
-                    Cancel & Return to Form
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setDuplicateConflict(null)}
+                  className="w-full py-2.5 text-xs text-gray-500 hover:text-gray-700 text-center font-medium"
+                >
+                  Cancel & Go Back
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* POPUP 2: RENAME SUGGESTION FOR NEW ACCOUNT */}
+      {/* 7. RENAME SUGGESTION POPUP */}
       {renamePrompt && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-60 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl overflow-hidden border border-blue-200 animate-fadeIn">
-            <div className="p-5 bg-blue-50 border-b border-blue-200 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg flex-shrink-0">
-                ✏️
-              </div>
+        <div className="fixed inset-0 bg-black/60 z-60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden border border-blue-200">
+            <div className="p-4 sm:p-5 bg-blue-50 border-b border-blue-200 flex items-center gap-3">
+              <span className="text-2xl">✏️</span>
               <div>
-                <h3 className="text-lg font-bold text-gray-800">Differentiate New Account</h3>
-                <p className="text-xs text-blue-800">Customize the name to avoid misunderstandings</p>
+                <h3 className="text-base sm:text-lg font-bold text-gray-900">Differentiate Account</h3>
+                <p className="text-xs text-blue-800">Customize the name to avoid mix-ups</p>
               </div>
             </div>
 
-            <form onSubmit={handleConfirmRenameAndCreate} className="p-6 space-y-4">
-              <p className="text-xs text-gray-600 leading-relaxed">
-                To prevent confusion with the existing account <strong className="text-gray-900 font-semibold">"{renamePrompt.existingCreditor.name}"</strong>, please adjust the name for this new account:
+            <form onSubmit={handleConfirmRenameAndCreate} className="p-4 sm:p-6 space-y-4">
+              <p className="text-xs text-gray-600">
+                To prevent confusion with <strong className="text-gray-900 font-semibold">"{renamePrompt.existingCreditor.name}"</strong>, please adjust the name for this new account:
               </p>
 
-              {/* Editable Name Input */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
-                  New Account Name
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Account Name
                 </label>
                 <input
                   ref={renameInputRef}
@@ -947,16 +1140,15 @@ export default function Creditors() {
                   required
                   value={renamePrompt.currentName}
                   onChange={e => setRenamePrompt({ ...renamePrompt, currentName: e.target.value })}
-                  className="w-full border-2 border-blue-400 rounded-lg p-2.5 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="Enter custom account name"
+                  className="w-full border-2 border-blue-400 rounded-xl p-3 text-base font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="Enter name"
                 />
               </div>
 
-              {/* Quick Clickable Suggestions */}
               {renamePrompt.suggestions && renamePrompt.suggestions.length > 0 && (
                 <div>
-                  <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-                    Or click a suggestion:
+                  <span className="block text-[11px] font-bold text-gray-500 uppercase mb-1.5">
+                    Quick Suggestions:
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {renamePrompt.suggestions.map((sug, idx) => (
@@ -964,10 +1156,10 @@ export default function Creditors() {
                         key={idx}
                         type="button"
                         onClick={() => setRenamePrompt({ ...renamePrompt, currentName: sug })}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                        className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition ${
                           renamePrompt.currentName === sug
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                            ? 'bg-blue-600 text-white border-blue-600 font-bold'
+                            : 'bg-gray-100 text-gray-700 border-gray-200 active:bg-gray-200'
                         }`}
                       >
                         {sug}
@@ -977,7 +1169,7 @@ export default function Creditors() {
                 </div>
               )}
 
-              <div className="pt-3 border-t flex justify-end space-x-2">
+              <div className="pt-2 border-t flex gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -987,7 +1179,7 @@ export default function Creditors() {
                       pendingRecord: renamePrompt.pendingRecord
                     });
                   }}
-                  className="px-4 py-2 border rounded-lg text-gray-600 hover:bg-gray-100 text-sm transition"
+                  className="flex-1 py-3 border rounded-xl text-gray-600 font-bold hover:bg-gray-100 text-sm"
                   disabled={formSubmitting}
                 >
                   Back
@@ -995,7 +1187,7 @@ export default function Creditors() {
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="px-5 py-2 bg-brand-green text-white font-semibold rounded-lg hover:bg-green-700 text-sm shadow transition"
+                  className="flex-1 py-3 bg-brand-green text-white font-bold rounded-xl hover:bg-green-700 active:bg-green-800 text-sm shadow"
                 >
                   {formSubmitting ? 'Creating...' : 'Confirm & Create'}
                 </button>
@@ -1005,48 +1197,75 @@ export default function Creditors() {
         </div>
       )}
 
-      {/* Settlement Modal */}
+      {/* 8. SETTLEMENT MODAL */}
       {settlementCreditor && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md shadow-xl">
-            <h3 className="text-xl font-bold mb-2 text-gray-800">Record Settlement</h3>
-            <p className="mb-4 text-sm text-gray-600">
-              Creditor: <span className="font-semibold text-gray-800">{settlementCreditor.name}</span>
-              {settlementCreditor.idNo !== '-' && <span className="ml-2 text-xs text-gray-500">[{settlementCreditor.idNo}]</span>}
-              <br />
-              Current Balance: <span className="font-bold text-red-600">Rs. {settlementCreditor.balance.toFixed(2)}</span>
-            </p>
-
-            <div className="space-y-4">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl p-4 sm:p-6 space-y-4">
+            <div className="flex justify-between items-start">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount Paid (Rs.)</label>
+                <h3 className="text-lg font-bold text-gray-900">Record Settlement</h3>
+                <p className="text-xs text-gray-500">Creditor: {settlementCreditor.name}</p>
+              </div>
+              <button
+                onClick={() => setSettlementCreditor(null)}
+                className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center text-lg"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="bg-red-50 border border-red-100 p-3 rounded-xl flex justify-between items-center">
+              <div>
+                <span className="text-xs text-red-700 block font-medium">Balance Due</span>
+                <span className="text-xl font-black text-red-600">
+                  Rs. {settlementCreditor.balance.toFixed(2)}
+                </span>
+              </div>
+              {settlementCreditor.balance > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSettlementAmount(settlementCreditor.balance.toString())}
+                  className="bg-white text-red-700 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-red-200 shadow-sm hover:bg-red-50"
+                >
+                  Pay Full Balance
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Amount Paid (Rs.) <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="number"
                   step="0.01"
                   value={settlementAmount}
                   onChange={e => setSettlementAmount(e.target.value)}
-                  className="w-full border rounded-lg p-2.5 font-bold text-gray-800 focus:ring-2 focus:ring-brand-green outline-none"
+                  className="w-full border rounded-xl p-3 text-lg font-black text-gray-900 focus:ring-2 focus:ring-brand-green outline-none"
                   placeholder="0.00"
                   autoFocus
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Note (Optional)</label>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Payment Note (Optional)
+                </label>
                 <input
                   type="text"
                   value={settlementNote}
                   onChange={e => setSettlementNote(e.target.value)}
-                  className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
-                  placeholder="e.g. Bank Transfer, Cash payment, Partial settlement"
+                  className="w-full border rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
+                  placeholder="e.g. Cash, Bank Transfer, GPay"
                 />
               </div>
             </div>
 
-            <div className="mt-6 flex justify-end space-x-2">
+            <div className="pt-2 flex gap-2">
               <button
                 type="button"
                 onClick={() => setSettlementCreditor(null)}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                className="flex-1 py-3 border rounded-xl text-gray-600 font-bold hover:bg-gray-100 text-sm"
                 disabled={settlementSubmitting}
               >
                 Cancel
@@ -1055,7 +1274,7 @@ export default function Creditors() {
                 type="button"
                 onClick={handleAddSettlement}
                 disabled={settlementSubmitting}
-                className="px-5 py-2 bg-brand-green text-white font-semibold rounded-lg hover:bg-green-700 transition"
+                className="flex-1 py-3 bg-brand-green text-white font-bold rounded-xl hover:bg-green-700 active:bg-green-800 text-sm shadow"
               >
                 {settlementSubmitting ? 'Recording...' : 'Confirm Payment'}
               </button>
@@ -1064,66 +1283,73 @@ export default function Creditors() {
         </div>
       )}
 
-      {/* Profile Modal */}
+      {/* 9. PROFILE & TRANSACTION HISTORY MODAL */}
       {selectedCreditor && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-2xl shadow-xl max-h-[90vh] flex flex-col overflow-hidden">
-            <div className="p-5 border-b flex justify-between items-start bg-gray-50">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b bg-gray-50 flex justify-between items-start flex-shrink-0">
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xl font-bold text-gray-800">{selectedCreditor.name}</h3>
+                  <h3 className="text-base sm:text-xl font-bold text-gray-900">{selectedCreditor.name}</h3>
                   {selectedCreditor.idNo !== '-' && (
-                    <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-xs font-mono">
+                    <span className="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[11px] font-mono">
                       {selectedCreditor.idNo}
                     </span>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-4 text-xs text-gray-500 mt-1">
-                  {selectedCreditor.phone !== '-' && <span>📞 {selectedCreditor.phone}</span>}
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 mt-1">
+                  {selectedCreditor.phone !== '-' && (
+                    <a href={`tel:${selectedCreditor.phone}`} className="text-brand-green font-semibold">
+                      📞 {selectedCreditor.phone}
+                    </a>
+                  )}
                   {selectedCreditor.address && <span>📍 {selectedCreditor.address}</span>}
                 </div>
               </div>
               <button
                 onClick={() => setSelectedCreditor(null)}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+                className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-lg leading-none"
               >
                 &times;
               </button>
             </div>
 
-            <div className="flex-1 overflow-auto p-6">
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
               {/* Summary Cards */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-red-50 p-4 rounded-lg text-center border border-red-100">
-                  <span className="block text-xs text-gray-500 uppercase font-semibold">Total Debt</span>
-                  <span className="text-lg md:text-xl font-bold text-red-600">
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                <div className="bg-red-50 p-2.5 sm:p-3 rounded-xl text-center border border-red-100">
+                  <span className="block text-[10px] sm:text-xs text-gray-500 uppercase font-semibold">Total Debt</span>
+                  <span className="text-xs sm:text-lg font-black text-red-600 truncate block">
                     Rs. {selectedCreditor.debt.toFixed(2)}
                   </span>
                 </div>
-                <div className="bg-green-50 p-4 rounded-lg text-center border border-green-100">
-                  <span className="block text-xs text-gray-500 uppercase font-semibold">Total Paid</span>
-                  <span className="text-lg md:text-xl font-bold text-green-600">
+                <div className="bg-green-50 p-2.5 sm:p-3 rounded-xl text-center border border-green-100">
+                  <span className="block text-[10px] sm:text-xs text-gray-500 uppercase font-semibold">Total Paid</span>
+                  <span className="text-xs sm:text-lg font-black text-green-600 truncate block">
                     Rs. {selectedCreditor.settled.toFixed(2)}
                   </span>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-lg text-center border border-gray-200">
-                  <span className="block text-xs text-gray-500 uppercase font-semibold">Balance Due</span>
-                  <span className="text-lg md:text-xl font-bold text-gray-800">
+                <div className="bg-gray-50 p-2.5 sm:p-3 rounded-xl text-center border border-gray-200">
+                  <span className="block text-[10px] sm:text-xs text-gray-500 uppercase font-semibold">Balance Due</span>
+                  <span className="text-xs sm:text-lg font-black text-gray-900 truncate block">
                     Rs. {selectedCreditor.balance.toFixed(2)}
                   </span>
                 </div>
               </div>
 
               {/* Quick Actions inside Profile */}
-              <div className="flex justify-end gap-2 mb-4">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => {
                     handleOpenAddModal(selectedCreditor);
                     setSelectedCreditor(null);
                   }}
-                  className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition"
+                  className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-sm"
                 >
-                  + Add More Debt
+                  <span>➕</span>
+                  <span>Add More Debt</span>
                 </button>
                 <button
                   onClick={() => {
@@ -1132,43 +1358,35 @@ export default function Creditors() {
                     setSettlementNote('');
                     setSelectedCreditor(null);
                   }}
-                  className="bg-brand-green hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition"
+                  className="py-2.5 px-3 bg-brand-green hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-sm"
                 >
-                  Record Settlement
+                  <span>💰</span>
+                  <span>Record Payment</span>
                 </button>
               </div>
 
-              {/* Transactions List */}
-              <h4 className="font-bold text-gray-700 mb-3 text-sm">Transaction History</h4>
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b text-xs text-gray-600">
-                    <tr>
-                      <th className="p-3 text-left">Date</th>
-                      <th className="p-3 text-left">Type</th>
-                      <th className="p-3 text-left">Note / Description</th>
-                      <th className="p-3 text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {selectedCreditor.transactions
-                      .slice()
-                      .sort((a, b) => {
-                        const dateA = new Date(a.date).getTime() || 0;
-                        const dateB = new Date(b.date).getTime() || 0;
-                        return dateB - dateA;
-                      })
-                      .map((t, idx) => (
-                        <tr key={idx} className={t.type === 'PAYMENT' ? 'bg-green-50/40' : ''}>
-                          <td className="p-3 text-gray-600 text-xs">
-                            {t.date ? new Date(t.date).toLocaleDateString() : 'N/A'}{' '}
-                            <span className="text-gray-400">
-                              {t.date ? new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </span>
-                          </td>
-                          <td className="p-3">
+              {/* Transaction History */}
+              <div>
+                <h4 className="font-bold text-gray-800 text-xs sm:text-sm mb-2">
+                  Transaction History ({selectedCreditor.transactions.length})
+                </h4>
+                
+                {/* Mobile Transaction Cards */}
+                <div className="space-y-2">
+                  {selectedCreditor.transactions
+                    .slice()
+                    .sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0))
+                    .map((t, idx) => (
+                      <div
+                        key={idx}
+                        className={`p-3 rounded-xl border text-xs flex justify-between items-start gap-2 ${
+                          t.type === 'PAYMENT' ? 'bg-green-50/50 border-green-200' : 'bg-gray-50 border-gray-200'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span
-                              className={`px-2 py-0.5 rounded text-xs font-bold ${
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
                                 t.type === 'DEBT'
                                   ? 'bg-red-100 text-red-700'
                                   : t.type === 'PAYMENT'
@@ -1178,38 +1396,39 @@ export default function Creditors() {
                             >
                               {t.manual ? 'MANUAL DEBT' : t.type}
                             </span>
-                          </td>
-                          <td className="p-3 text-gray-700 text-xs">
                             {t.receiptId && (
-                              <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded mr-1 font-mono text-[11px]">
+                              <span className="bg-gray-200 text-gray-700 px-1 rounded font-mono text-[10px]">
                                 {t.receiptId}
                               </span>
                             )}
+                          </div>
+
+                          <div className="text-gray-800 font-medium truncate">
                             {t.description || t.note || '-'}
-                            {t.dueDate && (
-                              <div className="text-[11px] text-amber-600 mt-0.5">
-                                Due by: {new Date(t.dueDate).toLocaleDateString()}
-                              </div>
-                            )}
-                          </td>
-                          <td
-                            className={`p-3 text-right font-medium ${
-                              t.type === 'DEBT' ? 'text-red-600' : 'text-green-600'
-                            }`}
-                          >
-                            {t.type === 'PAYMENT' ? '-' : '+'} Rs. {t.amount.toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
-                    {selectedCreditor.transactions.length === 0 && (
-                      <tr>
-                        <td colSpan="4" className="p-4 text-center text-gray-400 text-xs">
-                          No transactions recorded yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                          </div>
+
+                          <div className="text-[10px] text-gray-400">
+                            {t.date ? new Date(t.date).toLocaleDateString() : 'N/A'}{' '}
+                            {t.date ? new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          </div>
+                        </div>
+
+                        <div
+                          className={`font-black text-sm whitespace-nowrap text-right ${
+                            t.type === 'DEBT' ? 'text-red-600' : 'text-green-600'
+                          }`}
+                        >
+                          {t.type === 'PAYMENT' ? '-' : '+'} Rs. {t.amount.toFixed(2)}
+                        </div>
+                      </div>
+                    ))}
+
+                  {selectedCreditor.transactions.length === 0 && (
+                    <div className="p-4 text-center text-gray-400 text-xs">
+                      No transactions recorded yet.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

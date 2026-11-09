@@ -131,7 +131,7 @@ export default function Layout() {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto md:p-8 p-4 pt-20 md:pt-8 bg-gray-50">
+      <main className="flex-1 overflow-auto md:p-8 p-3 pt-18 md:pt-8 bg-gray-50">
         {renderView()}
       </main>
     </div>
