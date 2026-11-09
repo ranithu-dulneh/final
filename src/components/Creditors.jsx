@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../firebase';
 import { ref, onValue, push, serverTimestamp } from 'firebase/database';
 
@@ -25,12 +25,24 @@ export default function Creditors() {
     date: new Date().toISOString().split('T')[0],
     description: '',
     address: '',
-    dueDate: ''
+    dueDate: '',
+    creditorKey: ''
   });
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  // Search State
+  // Modal Search for Existing Creditors
+  const [existingSearchQuery, setExistingSearchQuery] = useState('');
+
+  // Conflict Resolution State
+  // When an entered name matches an existing creditor
+  const [duplicateConflict, setDuplicateConflict] = useState(null); // { existingCreditor, pendingRecord }
+  const [renamePrompt, setRenamePrompt] = useState(null); // { existingCreditor, pendingRecord, suggestedName, currentName }
+
+  // Search State for Main Table
   const [searchTerm, setSearchTerm] = useState('');
+
+  const nameInputRef = useRef(null);
+  const renameInputRef = useRef(null);
 
   useEffect(() => {
     const customersRef = ref(db, 'customers');
@@ -147,6 +159,7 @@ export default function Creditors() {
     })).sort((a, b) => b.balance - a.balance);
   }, [customersData, settlementsData]);
 
+  // Main table filter
   const filteredCreditors = useMemo(() => {
     return creditors.filter(c => {
       const matchesShow = showSettled ? true : c.balance > 0.01;
@@ -167,8 +180,51 @@ export default function Creditors() {
     });
   }, [creditors, showSettled, searchTerm]);
 
+  // Search existing creditors in the Add Creditor modal
+  const searchedExistingCreditors = useMemo(() => {
+    if (!existingSearchQuery.trim()) return [];
+    const q = existingSearchQuery.toLowerCase().trim();
+    return creditors.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      (c.phone && c.phone.toLowerCase().includes(q)) ||
+      (c.idNo && c.idNo.toLowerCase().includes(q)) ||
+      (c.address && c.address.toLowerCase().includes(q))
+    ).slice(0, 6);
+  }, [creditors, existingSearchQuery]);
+
+  // Generate smart name suggestions for new account when duplicate name occurs
+  const getNameSuggestions = (baseName, idNo, address) => {
+    const suggestions = [];
+    const lower = baseName.toLowerCase().trim();
+
+    // 1. Numbered: Name (2), Name (3), etc.
+    let num = 2;
+    while (creditors.some(c => c.name.toLowerCase().trim() === `${lower} (${num})`)) {
+      num++;
+    }
+    suggestions.push(`${baseName.trim()} (${num})`);
+
+    // 2. ID / NIC based
+    if (idNo && idNo.trim()) {
+      suggestions.push(`${baseName.trim()} [${idNo.trim()}]`);
+    } else {
+      suggestions.push(`${baseName.trim()} - New`);
+    }
+
+    // 3. Address based
+    if (address && address.trim()) {
+      suggestions.push(`${baseName.trim()} (${address.trim()})`);
+    }
+
+    return suggestions;
+  };
+
   // Open Add Creditor Modal
   const handleOpenAddModal = (presetCreditor = null) => {
+    setExistingSearchQuery('');
+    setDuplicateConflict(null);
+    setRenamePrompt(null);
+
     if (presetCreditor) {
       setFormMode('existing');
       setFormData({
@@ -199,11 +255,70 @@ export default function Creditors() {
     setIsAddModalOpen(true);
   };
 
-  // Submit Manual Creditor / Debt
-  const handleSaveManualCreditor = async (e) => {
+  // Select an existing creditor from the modal search bar
+  const handleSelectExistingCreditor = (creditor) => {
+    setFormMode('existing');
+    setFormData(prev => ({
+      ...prev,
+      name: creditor.name !== 'Unknown' ? creditor.name : '',
+      idNo: creditor.idNo !== '-' ? creditor.idNo : '',
+      phone: creditor.phone !== '-' ? creditor.phone : '',
+      address: creditor.address || '',
+      creditorKey: creditor.key
+    }));
+    setExistingSearchQuery('');
+  };
+
+  // Clear selected existing creditor and switch to New Creditor mode
+  const handleClearSelectedExisting = () => {
+    setFormMode('new');
+    setFormData(prev => ({
+      ...prev,
+      name: '',
+      idNo: '',
+      phone: '',
+      address: '',
+      creditorKey: ''
+    }));
+    setExistingSearchQuery('');
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  };
+
+  // Persist record to Firebase
+  const executeSaveRecord = async (finalRecord) => {
+    setFormSubmitting(true);
+    try {
+      await push(ref(db, 'customers'), finalRecord);
+
+      setIsAddModalOpen(false);
+      setDuplicateConflict(null);
+      setRenamePrompt(null);
+      setFormData({
+        name: '',
+        idNo: '',
+        phone: '',
+        amount: '',
+        date: new Date().toISOString().split('T')[0],
+        description: '',
+        address: '',
+        dueDate: '',
+        creditorKey: ''
+      });
+      alert(`Credit of Rs. ${finalRecord.amount.toFixed(2)} recorded for "${finalRecord.name}" successfully!`);
+    } catch (err) {
+      console.error(err);
+      alert("Error adding creditor: " + err.message);
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  // Handle Form Submission with Duplicate Detection
+  const handleFormSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.name.trim()) {
+    const trimmedName = formData.name.trim();
+    if (!trimmedName) {
       alert("Please enter the creditor's name.");
       return;
     }
@@ -219,47 +334,111 @@ export default function Creditors() {
       return;
     }
 
-    setFormSubmitting(true);
+    const generatedReceiptId = `CR-${Date.now().toString().slice(-6)}`;
+    const pendingRecord = {
+      name: trimmedName,
+      idNo: formData.idNo.trim() || '',
+      phone: formData.phone.trim() || '',
+      amount: numAmount,
+      date: new Date(formData.date + 'T12:00:00').toISOString(),
+      description: formData.description.trim() || 'Manual Credit Entry',
+      address: formData.address.trim() || '',
+      dueDate: formData.dueDate ? new Date(formData.dueDate + 'T12:00:00').toISOString() : '',
+      receiptId: generatedReceiptId,
+      manual: true,
+      creditorKey: formData.creditorKey || '',
+      createdAt: serverTimestamp()
+    };
 
-    try {
-      const generatedReceiptId = `CR-${Date.now().toString().slice(-6)}`;
-      
-      const record = {
-        name: formData.name.trim(),
-        idNo: formData.idNo.trim() || '',
-        phone: formData.phone.trim() || '',
-        amount: numAmount,
-        date: new Date(formData.date + 'T12:00:00').toISOString(),
-        description: formData.description.trim() || 'Manual Credit Entry',
-        address: formData.address.trim() || '',
-        dueDate: formData.dueDate ? new Date(formData.dueDate + 'T12:00:00').toISOString() : '',
-        receiptId: generatedReceiptId,
-        manual: true,
-        creditorKey: formData.creditorKey || '',
-        createdAt: serverTimestamp()
-      };
-
-      await push(ref(db, 'customers'), record);
-
-      setIsAddModalOpen(false);
-      setFormData({
-        name: '',
-        idNo: '',
-        phone: '',
-        amount: '',
-        date: new Date().toISOString().split('T')[0],
-        description: '',
-        address: '',
-        dueDate: '',
-        creditorKey: ''
-      });
-      alert(`Manual credit of Rs. ${numAmount.toFixed(2)} added for ${formData.name.trim()} successfully!`);
-    } catch (err) {
-      console.error(err);
-      alert("Error adding creditor: " + err.message);
-    } finally {
-      setFormSubmitting(false);
+    // If already in 'existing' mode with an established creditorKey, save directly
+    if (formMode === 'existing' && formData.creditorKey) {
+      await executeSaveRecord(pendingRecord);
+      return;
     }
+
+    // Check if entered name already exists in the system (case-insensitive)
+    const existingMatch = creditors.find(
+      c => c.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+
+    if (existingMatch) {
+      // Conflict detected! Ask operator: Add to existing account OR create new account?
+      setDuplicateConflict({
+        existingCreditor: existingMatch,
+        pendingRecord
+      });
+      return;
+    }
+
+    // New name, no duplicate
+    const newUniqueKey = `c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    pendingRecord.creditorKey = newUniqueKey;
+    await executeSaveRecord(pendingRecord);
+  };
+
+  // Operator chooses to add to the existing account
+  const handleResolveAddToExisting = async () => {
+    if (!duplicateConflict) return;
+    const { existingCreditor, pendingRecord } = duplicateConflict;
+
+    const recordToSave = {
+      ...pendingRecord,
+      name: existingCreditor.name,
+      creditorKey: existingCreditor.key,
+      // Retain or complement existing phone / idNo
+      phone: existingCreditor.phone !== '-' ? existingCreditor.phone : pendingRecord.phone,
+      idNo: existingCreditor.idNo !== '-' ? existingCreditor.idNo : pendingRecord.idNo
+    };
+
+    await executeSaveRecord(recordToSave);
+  };
+
+  // Operator chooses to create a new account -> open Name Change / Suggestion popup
+  const handleResolveCreateNewAccount = () => {
+    if (!duplicateConflict) return;
+    const { existingCreditor, pendingRecord } = duplicateConflict;
+
+    const suggestions = getNameSuggestions(
+      pendingRecord.name,
+      pendingRecord.idNo,
+      pendingRecord.address
+    );
+    const initialSuggestion = suggestions[0] || `${pendingRecord.name} (New)`;
+
+    setRenamePrompt({
+      existingCreditor,
+      pendingRecord,
+      suggestions,
+      currentName: initialSuggestion
+    });
+    setDuplicateConflict(null);
+
+    setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 100);
+  };
+
+  // Confirm new account with modified name
+  const handleConfirmRenameAndCreate = async (e) => {
+    e.preventDefault();
+    if (!renamePrompt) return;
+
+    const finalizedName = renamePrompt.currentName.trim();
+    if (!finalizedName) {
+      alert("Please provide a name for this new account.");
+      return;
+    }
+
+    // Generate unique key to prevent grouping with the existing account
+    const newUniqueKey = `c_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const finalRecord = {
+      ...renamePrompt.pendingRecord,
+      name: finalizedName,
+      creditorKey: newUniqueKey
+    };
+
+    await executeSaveRecord(finalRecord);
   };
 
   // Handle Settlement
@@ -315,7 +494,7 @@ export default function Creditors() {
             Add Creditor
           </button>
 
-          {/* Search Box */}
+          {/* Search Box for Main List */}
           <input
             type="text"
             placeholder="Search Name, Phone, ID No..."
@@ -426,6 +605,7 @@ export default function Creditors() {
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+            {/* Modal Header */}
             <div className="p-5 border-b bg-gray-50 flex justify-between items-center">
               <div>
                 <h3 className="text-lg font-bold text-gray-800">
@@ -441,55 +621,74 @@ export default function Creditors() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveManualCreditor} className="p-6 overflow-y-auto space-y-4 flex-1">
-              {/* Option to toggle between New or Existing Creditor */}
-              {creditors.length > 0 && formMode !== 'existing' && (
-                <div className="mb-2">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Creditor Selection</label>
-                  <select
-                    onChange={(e) => {
-                      if (e.target.value === '__new__') {
-                        setFormData({
-                          name: '',
-                          idNo: '',
-                          phone: '',
-                          amount: '',
-                          date: new Date().toISOString().split('T')[0],
-                          description: '',
-                          address: '',
-                          dueDate: '',
-                          creditorKey: ''
-                        });
-                      } else {
-                        const found = creditors.find(c => c.key === e.target.value);
-                        if (found) {
-                          setFormData({
-                            name: found.name !== 'Unknown' ? found.name : '',
-                            idNo: found.idNo !== '-' ? found.idNo : '',
-                            phone: found.phone !== '-' ? found.phone : '',
-                            amount: '',
-                            date: new Date().toISOString().split('T')[0],
-                            description: '',
-                            address: found.address || '',
-                            dueDate: '',
-                            creditorKey: found.key
-                          });
-                        }
-                      }
-                    }}
-                    className="w-full border rounded-lg p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-brand-green outline-none"
-                  >
-                    <option value="__new__">+ Create New Creditor Profile</option>
-                    <optgroup label="Or select existing creditor">
-                      {creditors.map(c => (
-                        <option key={c.key} value={c.key}>
-                          {c.name} {c.phone !== '-' ? `(${c.phone})` : ''} {c.idNo !== '-' ? `[${c.idNo}]` : ''} - Due: Rs. {c.balance.toFixed(2)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-              )}
+            <form onSubmit={handleFormSubmit} className="p-6 overflow-y-auto space-y-4 flex-1">
+              {/* SEARCH BAR FOR EXISTING CREDITORS */}
+              <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1 flex items-center justify-between">
+                  <span>Search Existing Creditors</span>
+                  {formMode === 'existing' && (
+                    <span className="text-[11px] text-green-700 font-bold bg-green-100 px-2 py-0.5 rounded">
+                      Linked to Existing Account
+                    </span>
+                  )}
+                </label>
+
+                {formMode === 'existing' ? (
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 p-2.5 rounded-lg">
+                    <div className="text-xs">
+                      <span className="font-bold text-gray-800">{formData.name}</span>
+                      {formData.idNo && <span className="ml-1 text-gray-600">[{formData.idNo}]</span>}
+                      {formData.phone && <span className="ml-1 text-gray-600">({formData.phone})</span>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClearSelectedExisting}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold underline ml-2"
+                    >
+                      Change / New
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Type name, phone, or ID to find existing creditor..."
+                      value={existingSearchQuery}
+                      onChange={e => setExistingSearchQuery(e.target.value)}
+                      className="w-full border rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-brand-green outline-none"
+                    />
+
+                    {/* Instant Search Results Dropdown */}
+                    {searchedExistingCreditors.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto divide-y">
+                        {searchedExistingCreditors.map(ec => (
+                          <div
+                            key={ec.key}
+                            onClick={() => handleSelectExistingCreditor(ec)}
+                            className="p-2.5 hover:bg-green-50 cursor-pointer flex justify-between items-center transition"
+                          >
+                            <div>
+                              <div className="font-bold text-xs text-gray-800">{ec.name}</div>
+                              <div className="text-[11px] text-gray-500">
+                                {ec.phone !== '-' ? `📞 ${ec.phone}` : ''} {ec.idNo !== '-' ? `• ID: ${ec.idNo}` : ''}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-xs font-bold text-red-600">Rs. {ec.balance.toFixed(2)}</span>
+                              <span className="block text-[10px] text-brand-green font-semibold">Select ➔</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {existingSearchQuery.trim() && searchedExistingCreditors.length === 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 p-2.5 text-xs text-gray-400 text-center">
+                        No existing creditors match. You can fill out the form below to create a new profile.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* Creditor Name (Required) */}
               <div>
@@ -497,11 +696,19 @@ export default function Creditors() {
                   Creditor Name <span className="text-red-500">*</span>
                 </label>
                 <input
+                  ref={nameInputRef}
                   type="text"
                   required
                   placeholder="e.g. John Doe / Farm Supplies Co."
                   value={formData.name}
-                  onChange={e => setFormData({ ...formData, name: e.target.value })}
+                  onChange={e => {
+                    setFormData({ ...formData, name: e.target.value });
+                    if (formMode === 'existing') {
+                      // If user edits name manually, detach from existing creditorKey
+                      setFormData(prev => ({ ...prev, name: e.target.value, creditorKey: '' }));
+                      setFormMode('new');
+                    }
+                  }}
                   className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
                   autoFocus
                 />
@@ -573,7 +780,7 @@ export default function Creditors() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Previous balance, Direct supply of urea, Invoice #450"
+                  placeholder="e.g. Previous balance, Direct supply of fertilizer, Invoice #450"
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                   className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-brand-green outline-none"
@@ -623,6 +830,174 @@ export default function Creditors() {
                   className="px-5 py-2 bg-brand-green text-white font-semibold rounded-lg hover:bg-green-700 transition flex items-center gap-2"
                 >
                   {formSubmitting ? 'Saving...' : 'Save Creditor'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP 1: DUPLICATE NAME CONFLICT RESOLUTION */}
+      {duplicateConflict && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-60 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl overflow-hidden border border-amber-200 animate-fadeIn">
+            <div className="p-5 bg-amber-50 border-b border-amber-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xl flex-shrink-0">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-800">Creditor Already Exists</h3>
+                <p className="text-xs text-amber-800">A creditor with this name is already registered.</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                A profile for <strong className="text-gray-900 font-bold">"{duplicateConflict.existingCreditor.name}"</strong> already exists in the system:
+              </p>
+
+              {/* Existing Creditor Summary Card */}
+              <div className="bg-gray-50 border rounded-lg p-3 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Current Balance Due:</span>
+                  <span className="font-bold text-red-600">Rs. {duplicateConflict.existingCreditor.balance.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Mobile Phone:</span>
+                  <span className="text-gray-800 font-medium">{duplicateConflict.existingCreditor.phone !== '-' ? duplicateConflict.existingCreditor.phone : 'Not provided'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">ID / NIC No:</span>
+                  <span className="text-gray-800 font-medium">{duplicateConflict.existingCreditor.idNo !== '-' ? duplicateConflict.existingCreditor.idNo : 'Not provided'}</span>
+                </div>
+                {duplicateConflict.existingCreditor.address && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Address:</span>
+                    <span className="text-gray-800 font-medium truncate max-w-[200px]">{duplicateConflict.existingCreditor.address}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t pt-3">
+                <p className="text-xs text-gray-600 font-semibold mb-3">
+                  How would you like to handle the Rs. {duplicateConflict.pendingRecord.amount.toFixed(2)} credit?
+                </p>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleResolveAddToExisting}
+                    disabled={formSubmitting}
+                    className="w-full p-3 bg-brand-green hover:bg-green-700 text-white rounded-lg font-semibold text-sm shadow flex items-center justify-between transition"
+                  >
+                    <span>Add to Existing Account</span>
+                    <span>➔</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResolveCreateNewAccount}
+                    className="w-full p-3 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg font-semibold text-sm flex items-center justify-between transition"
+                  >
+                    <span>Create a New Account</span>
+                    <span>➔</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDuplicateConflict(null)}
+                    className="w-full py-2 text-xs text-gray-500 hover:text-gray-700 text-center"
+                  >
+                    Cancel & Return to Form
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP 2: RENAME SUGGESTION FOR NEW ACCOUNT */}
+      {renamePrompt && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-60 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl overflow-hidden border border-blue-200 animate-fadeIn">
+            <div className="p-5 bg-blue-50 border-b border-blue-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg flex-shrink-0">
+                ✏️
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-800">Differentiate New Account</h3>
+                <p className="text-xs text-blue-800">Customize the name to avoid misunderstandings</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmRenameAndCreate} className="p-6 space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                To prevent confusion with the existing account <strong className="text-gray-900 font-semibold">"{renamePrompt.existingCreditor.name}"</strong>, please adjust the name for this new account:
+              </p>
+
+              {/* Editable Name Input */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                  New Account Name
+                </label>
+                <input
+                  ref={renameInputRef}
+                  type="text"
+                  required
+                  value={renamePrompt.currentName}
+                  onChange={e => setRenamePrompt({ ...renamePrompt, currentName: e.target.value })}
+                  className="w-full border-2 border-blue-400 rounded-lg p-2.5 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="Enter custom account name"
+                />
+              </div>
+
+              {/* Quick Clickable Suggestions */}
+              {renamePrompt.suggestions && renamePrompt.suggestions.length > 0 && (
+                <div>
+                  <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
+                    Or click a suggestion:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {renamePrompt.suggestions.map((sug, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setRenamePrompt({ ...renamePrompt, currentName: sug })}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                          renamePrompt.currentName === sug
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                        }`}
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-3 border-t flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenamePrompt(null);
+                    setDuplicateConflict({
+                      existingCreditor: renamePrompt.existingCreditor,
+                      pendingRecord: renamePrompt.pendingRecord
+                    });
+                  }}
+                  className="px-4 py-2 border rounded-lg text-gray-600 hover:bg-gray-100 text-sm transition"
+                  disabled={formSubmitting}
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={formSubmitting}
+                  className="px-5 py-2 bg-brand-green text-white font-semibold rounded-lg hover:bg-green-700 text-sm shadow transition"
+                >
+                  {formSubmitting ? 'Creating...' : 'Confirm & Create'}
                 </button>
               </div>
             </form>
