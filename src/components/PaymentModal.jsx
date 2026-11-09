@@ -9,12 +9,14 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
   // Customer Details for Credit Sale
   const [customer, setCustomer] = useState({
     name: '',
+    idNo: '',
     phone: '',
     description: ''
   });
 
   // Refs for focusing inputs
   const nameRef = useRef(null);
+  const idNoRef = useRef(null);
   const phoneRef = useRef(null);
   const descRef = useRef(null);
   const confirmBtnRef = useRef(null);
@@ -57,7 +59,8 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
   const handleFormKeyDown = (e, field) => {
       if (e.key === 'Enter') {
           e.preventDefault();
-          if (field === 'name') phoneRef.current?.focus();
+          if (field === 'name') idNoRef.current?.focus();
+          if (field === 'idNo') phoneRef.current?.focus();
           if (field === 'phone') descRef.current?.focus();
           if (field === 'description') {
                // Submit
@@ -130,17 +133,31 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
                             autoFocus
                          />
                      </div>
-                     <div>
-                         <label className="block text-sm font-medium text-gray-700">Phone No</label>
-                         <input
-                            ref={phoneRef}
-                            type="text"
-                            className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none"
-                            value={customer.phone}
-                            onChange={e => setCustomer({...customer, phone: e.target.value})}
-                            onKeyDown={(e) => handleFormKeyDown(e, 'phone')}
-                            placeholder="Phone Number"
-                         />
+                     <div className="grid grid-cols-2 gap-3">
+                       <div>
+                           <label className="block text-sm font-medium text-gray-700">ID / NIC No (Optional)</label>
+                           <input
+                              ref={idNoRef}
+                              type="text"
+                              className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none"
+                              value={customer.idNo}
+                              onChange={e => setCustomer({...customer, idNo: e.target.value})}
+                              onKeyDown={(e) => handleFormKeyDown(e, 'idNo')}
+                              placeholder="ID / NIC"
+                           />
+                       </div>
+                       <div>
+                           <label className="block text-sm font-medium text-gray-700">Phone No (Optional)</label>
+                           <input
+                              ref={phoneRef}
+                              type="text"
+                              className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none"
+                              value={customer.phone}
+                              onChange={e => setCustomer({...customer, phone: e.target.value})}
+                              onKeyDown={(e) => handleFormKeyDown(e, 'phone')}
+                              placeholder="Phone Number"
+                           />
+                       </div>
                      </div>
                      <div>
                          <label className="block text-sm font-medium text-gray-700">Amount Description / Note</label>
