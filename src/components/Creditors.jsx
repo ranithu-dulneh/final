@@ -33,8 +33,8 @@ export default function Creditors() {
   });
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  // Modal Search for Existing Creditors
-  const [existingSearchQuery, setExistingSearchQuery] = useState('');
+  // Modal Name Autocomplete State
+  const [showNameDropdown, setShowNameDropdown] = useState(false);
 
   // Conflict Resolution State
   const [duplicateConflict, setDuplicateConflict] = useState(null); // { existingCreditor, pendingRecord }
@@ -212,17 +212,24 @@ export default function Creditors() {
     });
   }, [creditors, filterStatus, searchTerm]);
 
-  // Search existing creditors in the Add Creditor modal
+  // Search existing creditors directly using formData.name
   const searchedExistingCreditors = useMemo(() => {
-    if (!existingSearchQuery.trim()) return [];
-    const q = existingSearchQuery.toLowerCase().trim();
+    const q = formData.name.toLowerCase().trim();
+    if (!q || formMode === 'existing') return [];
     return creditors.filter(c =>
       c.name.toLowerCase().includes(q) ||
       (c.phone && c.phone.toLowerCase().includes(q)) ||
       (c.idNo && c.idNo.toLowerCase().includes(q)) ||
       (c.address && c.address.toLowerCase().includes(q))
     ).slice(0, 5);
-  }, [creditors, existingSearchQuery]);
+  }, [creditors, formData.name, formMode]);
+
+  // Exact match detection for already taken names
+  const exactMatchCreditor = useMemo(() => {
+    const trimmed = formData.name.trim().toLowerCase();
+    if (!trimmed || formMode === 'existing') return null;
+    return creditors.find(c => c.name.trim().toLowerCase() === trimmed) || null;
+  }, [creditors, formData.name, formMode]);
 
   // Generate smart name suggestions for new account when duplicate name occurs
   const getNameSuggestions = (baseName, idNo, address) => {
@@ -250,7 +257,7 @@ export default function Creditors() {
 
   // Open Add Creditor Modal
   const handleOpenAddModal = (presetCreditor = null) => {
-    setExistingSearchQuery('');
+    setShowNameDropdown(false);
     setDuplicateConflict(null);
     setRenamePrompt(null);
 
@@ -286,7 +293,7 @@ export default function Creditors() {
     setIsAddModalOpen(true);
   };
 
-  // Select an existing creditor from the modal search bar
+  // Select an existing creditor from the name dropdown
   const handleSelectExistingCreditor = (creditor) => {
     setFormMode('existing');
     setFormData(prev => ({
@@ -297,7 +304,7 @@ export default function Creditors() {
       address: creditor.address || '',
       creditorKey: creditor.key
     }));
-    setExistingSearchQuery('');
+    setShowNameDropdown(false);
   };
 
   // Clear selected existing creditor and switch to New Creditor mode
@@ -305,13 +312,9 @@ export default function Creditors() {
     setFormMode('new');
     setFormData(prev => ({
       ...prev,
-      name: '',
-      idNo: '',
-      phone: '',
-      address: '',
       creditorKey: ''
     }));
-    setExistingSearchQuery('');
+    setShowNameDropdown(false);
     setTimeout(() => nameInputRef.current?.focus(), 50);
   };
 
@@ -846,90 +849,150 @@ export default function Creditors() {
             </div>
 
             <form onSubmit={handleFormSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-3.5 flex-1 text-sm">
-              {/* SEARCH BAR FOR EXISTING CREDITORS */}
-              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+              {/* UNIFIED CREDITOR NAME & LIVE SEARCH INPUT */}
+              <div className="relative">
                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1 flex items-center justify-between">
-                  <span>Search Existing Creditor</span>
-                  {formMode === 'existing' && (
-                    <span className="text-[10px] text-green-700 font-bold bg-green-100 px-2 py-0.5 rounded">
-                      Linked to Account
-                    </span>
-                  )}
+                  <span>Creditor Name <span className="text-red-500">*</span></span>
+                  <span className="text-[11px] text-gray-400 font-normal">Type to search existing or enter new</span>
                 </label>
 
-                {formMode === 'existing' ? (
-                  <div className="flex items-center justify-between bg-green-50 border border-green-200 p-2.5 rounded-lg">
-                    <div className="text-xs">
-                      <span className="font-bold text-gray-800">{formData.name}</span>
-                      {formData.idNo && <span className="ml-1 text-gray-600">[{formData.idNo}]</span>}
-                      {formData.phone && <span className="ml-1 text-gray-600">({formData.phone})</span>}
+                <div className="relative">
+                  <input
+                    ref={nameInputRef}
+                    type="text"
+                    required
+                    placeholder="Type name (e.g. John Perera)..."
+                    value={formData.name}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        name: val,
+                        creditorKey: formMode === 'existing' ? '' : prev.creditorKey
+                      }));
+                      if (formMode === 'existing') setFormMode('new');
+                      setShowNameDropdown(true);
+                    }}
+                    onFocus={() => setShowNameDropdown(true)}
+                    className={`w-full border rounded-xl p-3 text-base outline-none transition ${
+                      exactMatchCreditor && formMode !== 'existing'
+                        ? 'border-amber-400 focus:ring-2 focus:ring-amber-400 bg-amber-50/20'
+                        : formMode === 'existing'
+                        ? 'border-green-500 focus:ring-2 focus:ring-green-400 bg-green-50/20'
+                        : 'border-gray-300 focus:ring-2 focus:ring-brand-green'
+                    }`}
+                    autoFocus
+                  />
+
+                  {formData.name && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, name: '', idNo: '', phone: '', address: '', creditorKey: '' }));
+                        setFormMode('new');
+                        setShowNameDropdown(false);
+                        nameInputRef.current?.focus();
+                      }}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 text-sm font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Autocomplete Dropdown with Matching Existing Customers */}
+                {showNameDropdown && searchedExistingCreditors.length > 0 && formMode !== 'existing' && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-30 max-h-52 overflow-y-auto divide-y">
+                    <div className="p-2 bg-gray-50 text-[11px] font-bold text-gray-500 uppercase flex justify-between items-center">
+                      <span>Existing Customers Found</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowNameDropdown(false)}
+                        className="text-gray-400 hover:text-gray-600 text-xs font-bold"
+                      >
+                        ✕ Close
+                      </button>
                     </div>
+                    {searchedExistingCreditors.map(ec => (
+                      <div
+                        key={ec.key}
+                        onClick={() => handleSelectExistingCreditor(ec)}
+                        className="p-3 hover:bg-green-50 cursor-pointer flex justify-between items-center transition"
+                      >
+                        <div>
+                          <div className="font-bold text-xs sm:text-sm text-gray-800">{ec.name}</div>
+                          <div className="text-[11px] text-gray-500">
+                            {ec.phone !== '-' ? `📞 ${ec.phone}` : ''} {ec.idNo !== '-' ? `• ID: ${ec.idNo}` : ''}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-bold text-red-600">Rs. {ec.balance.toFixed(2)}</span>
+                          <span className="block text-[10px] text-brand-green font-semibold">Select Profile ➔</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* If already linked to an existing profile */}
+                {formMode === 'existing' && (
+                  <div className="mt-2 flex items-center justify-between bg-green-50 border border-green-200 p-2.5 rounded-xl text-xs">
+                    <span className="text-green-800 font-semibold flex items-center gap-1.5">
+                      <span>✓ Linked to existing profile:</span>
+                      <strong className="font-bold text-gray-900">{formData.name}</strong>
+                    </span>
                     <button
                       type="button"
                       onClick={handleClearSelectedExisting}
                       className="text-xs text-red-600 hover:text-red-800 font-bold underline ml-2"
                     >
-                      Change
+                      Unlink / Create as New
                     </button>
                   </div>
-                ) : (
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Type name, phone, or ID to find..."
-                      value={existingSearchQuery}
-                      onChange={e => setExistingSearchQuery(e.target.value)}
-                      className="w-full border rounded-lg p-2.5 text-xs sm:text-sm bg-white focus:ring-2 focus:ring-brand-green outline-none"
-                    />
+                )}
 
-                    {/* Instant Search Results */}
-                    {searchedExistingCreditors.length > 0 && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-20 max-h-44 overflow-y-auto divide-y">
-                        {searchedExistingCreditors.map(ec => (
-                          <div
-                            key={ec.key}
-                            onClick={() => handleSelectExistingCreditor(ec)}
-                            className="p-2.5 hover:bg-green-50 cursor-pointer flex justify-between items-center transition"
-                          >
-                            <div>
-                              <div className="font-bold text-xs text-gray-800">{ec.name}</div>
-                              <div className="text-[11px] text-gray-500">
-                                {ec.phone !== '-' ? `📞 ${ec.phone}` : ''} {ec.idNo !== '-' ? `• ID: ${ec.idNo}` : ''}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-xs font-bold text-red-600">Rs. {ec.balance.toFixed(2)}</span>
-                              <span className="block text-[10px] text-brand-green font-semibold">Select ➔</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                {/* IF NAME IS ALREADY TAKEN: Suggest to add to same profile or change name */}
+                {exactMatchCreditor && formMode !== 'existing' && (
+                  <div className="mt-2.5 p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs space-y-2 animate-fadeIn">
+                    <div>
+                      <span className="font-bold text-amber-900 block text-sm flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>This name is already taken!</span>
+                      </span>
+                      <p className="text-amber-800 mt-0.5">
+                        A customer named <strong>"{exactMatchCreditor.name}"</strong> already exists with a balance of <strong>Rs. {exactMatchCreditor.balance.toFixed(2)}</strong>.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectExistingCreditor(exactMatchCreditor)}
+                        className="bg-brand-green hover:bg-green-700 active:scale-95 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition flex items-center gap-1"
+                      >
+                        <span>✓</span>
+                        <span>Add to {exactMatchCreditor.name}'s Profile</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const suggestions = getNameSuggestions(formData.name, formData.idNo, formData.address);
+                          setRenamePrompt({
+                            existingCreditor: exactMatchCreditor,
+                            pendingRecord: { ...formData, name: formData.name.trim() },
+                            suggestions,
+                            currentName: suggestions[0] || `${formData.name} (2)`
+                          });
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition flex items-center gap-1"
+                      >
+                        <span>✏️</span>
+                        <span>Change Name of Customer</span>
+                      </button>
+                    </div>
                   </div>
                 )}
-              </div>
-
-              {/* Creditor Name (Required) */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                  Creditor Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  ref={nameInputRef}
-                  type="text"
-                  required
-                  placeholder="e.g. John Perera / Agro Supplies"
-                  value={formData.name}
-                  onChange={e => {
-                    setFormData({ ...formData, name: e.target.value });
-                    if (formMode === 'existing') {
-                      setFormData(prev => ({ ...prev, name: e.target.value, creditorKey: '' }));
-                      setFormMode('new');
-                    }
-                  }}
-                  className="w-full border rounded-lg p-3 text-base focus:ring-2 focus:ring-brand-green outline-none"
-                  autoFocus
-                />
               </div>
 
               {/* ID No & Mobile No */}
