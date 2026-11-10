@@ -11,6 +11,7 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
     name: '',
     idNo: '',
     phone: '',
+    invoiceNo: '',
     description: ''
   });
 
@@ -165,17 +166,29 @@ export default function PaymentModal({ onClose, onConfirm, total }) {
                            />
                        </div>
                      </div>
-                     <div>
-                         <label className="block text-sm font-medium text-gray-700">Amount Description / Note</label>
-                         <input
-                            ref={descRef}
-                            type="text"
-                            className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none"
-                            value={customer.description}
-                            onChange={e => setCustomer({...customer, description: e.target.value})}
-                            onKeyDown={(e) => handleFormKeyDown(e, 'description')}
-                            placeholder="Items description or note"
-                         />
+                     <div className="grid grid-cols-2 gap-3">
+                       <div>
+                           <label className="block text-sm font-medium text-gray-700">Invoice / Bill No</label>
+                           <input
+                              type="text"
+                              className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none font-mono"
+                              value={customer.invoiceNo}
+                              onChange={e => setCustomer({...customer, invoiceNo: e.target.value})}
+                              placeholder="e.g. INV-1002"
+                           />
+                       </div>
+                       <div>
+                           <label className="block text-sm font-medium text-gray-700">Amount Note</label>
+                           <input
+                              ref={descRef}
+                              type="text"
+                              className="w-full p-2 border rounded focus:ring-2 focus:ring-brand-green outline-none"
+                              value={customer.description}
+                              onChange={e => setCustomer({...customer, description: e.target.value})}
+                              onKeyDown={(e) => handleFormKeyDown(e, 'description')}
+                              placeholder="Items note"
+                           />
+                       </div>
                      </div>
                      <div className="pt-2 flex justify-between">
                          <button onClick={() => setStep('selection')} className="text-gray-500 hover:text-gray-700">Back</button>

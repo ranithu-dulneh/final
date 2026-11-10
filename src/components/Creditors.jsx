@@ -23,6 +23,7 @@ export default function Creditors() {
     name: '',
     idNo: '',
     phone: '',
+    invoiceNo: '',
     amount: '',
     date: new Date().toISOString().split('T')[0],
     description: '',
@@ -117,6 +118,7 @@ export default function Creditors() {
         amount: debtAmount,
         description: sale.description || (sale.manual ? 'Manual Credit Entry' : 'Credit Sale'),
         receiptId: sale.receiptId || null,
+        invoiceNo: sale.invoiceNo || null,
         manual: !!sale.manual,
         idNo: idNo || null,
         address: address || null,
@@ -201,6 +203,7 @@ export default function Creditors() {
         (c.address && c.address.toLowerCase().includes(searchLower)) ||
         c.transactions.some(t =>
           (t.receiptId && t.receiptId.toLowerCase().includes(searchLower)) ||
+          (t.invoiceNo && t.invoiceNo.toLowerCase().includes(searchLower)) ||
           (t.description && t.description.toLowerCase().includes(searchLower)) ||
           (t.note && t.note.toLowerCase().includes(searchLower))
         );
@@ -257,6 +260,7 @@ export default function Creditors() {
         name: presetCreditor.name !== 'Unknown' ? presetCreditor.name : '',
         idNo: presetCreditor.idNo !== '-' ? presetCreditor.idNo : '',
         phone: presetCreditor.phone !== '-' ? presetCreditor.phone : '',
+        invoiceNo: '',
         amount: '',
         date: new Date().toISOString().split('T')[0],
         description: '',
@@ -270,6 +274,7 @@ export default function Creditors() {
         name: '',
         idNo: '',
         phone: '',
+        invoiceNo: '',
         amount: '',
         date: new Date().toISOString().split('T')[0],
         description: '',
@@ -323,6 +328,7 @@ export default function Creditors() {
         name: '',
         idNo: '',
         phone: '',
+        invoiceNo: '',
         amount: '',
         date: new Date().toISOString().split('T')[0],
         description: '',
@@ -365,12 +371,13 @@ export default function Creditors() {
       name: trimmedName,
       idNo: formData.idNo.trim() || '',
       phone: formData.phone.trim() || '',
+      invoiceNo: formData.invoiceNo.trim() || '',
       amount: numAmount,
       date: new Date(formData.date + 'T12:00:00').toISOString(),
       description: formData.description.trim() || 'Manual Credit Entry',
       address: formData.address.trim() || '',
       dueDate: formData.dueDate ? new Date(formData.dueDate + 'T12:00:00').toISOString() : '',
-      receiptId: generatedReceiptId,
+      receiptId: formData.invoiceNo.trim() || generatedReceiptId,
       manual: true,
       creditorKey: formData.creditorKey || '',
       createdAt: serverTimestamp()
@@ -984,18 +991,32 @@ export default function Creditors() {
                 </div>
               </div>
 
-              {/* Reason / Note */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                  Reason / Description <span className="text-gray-400 font-normal">(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Fertilizer supply, Opening balance"
-                  value={formData.description}
-                  onChange={e => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
-                />
+              {/* Invoice No & Reason / Description */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                    Invoice / Bill No <span className="text-gray-400 font-normal">(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. INV-10452 / Bill #88"
+                    value={formData.invoiceNo}
+                    onChange={e => setFormData({ ...formData, invoiceNo: e.target.value })}
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base font-mono focus:ring-2 focus:ring-brand-green outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                    Reason / Description <span className="text-gray-400 font-normal">(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Fertilizer supply, Opening balance"
+                    value={formData.description}
+                    onChange={e => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full border rounded-lg p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-brand-green outline-none"
+                  />
+                </div>
               </div>
 
               {/* Address & Due Date */}
@@ -1396,7 +1417,12 @@ export default function Creditors() {
                             >
                               {t.manual ? 'MANUAL DEBT' : t.type}
                             </span>
-                            {t.receiptId && (
+                            {t.invoiceNo && (
+                              <span className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-mono text-[10px] font-bold">
+                                Inv #{t.invoiceNo}
+                              </span>
+                            )}
+                            {t.receiptId && !t.invoiceNo && (
                               <span className="bg-gray-200 text-gray-700 px-1 rounded font-mono text-[10px]">
                                 {t.receiptId}
                               </span>
